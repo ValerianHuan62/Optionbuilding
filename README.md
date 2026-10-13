@@ -1,4 +1,6 @@
-# Options Strategy Workbench
+# Optionbuilding · Options Strategy Workbench
+
+play options like building blocks！
 
 本地运行的股指期权组合研究工具。所有组合、定价、风险和情景计算都在浏览器中完成；不连接行情服务、云端 API 或交易系统。
 
@@ -20,7 +22,7 @@ npm run test
 
 1. 在顶部设置标的、指数点位、到期日、合约乘数与定价模型。
 2. 使用 `ADD CALL` 或 `ADD PUT` 添加单腿。每条腿独立设置方向、执行价、成交权利金、张数、乘数、到期日和 IV。
-3. 需要手动 Greeks 时打开 `EDIT LEG GREEKS`，填写**单份期权报价**的希腊值。未填值在组合汇总中显示 `N/A`。
+3. 每条期权腿的卡片都直接显示 Delta、Gamma、Theta、Vega、Rho 手工输入框。默认 `MANUAL` 模式会实时汇总手工值；选择 `MODEL` 后则使用定价模型 Greeks。
 4. 组合变化会即时更新损益图、规则识别、风险注释和情景估值。
 5. 可在左侧命名保存组合，或用顶栏 JSON 图标导入/导出；当前组合和命名组合保存在浏览器 LocalStorage。
 
