@@ -1,0 +1,33 @@
+export type OptionType = 'CALL' | 'PUT';
+export type Side = 'LONG' | 'SHORT';
+export type PricingModel = 'BSM' | 'BLACK76';
+export type GreekInput = { delta?: number; gamma?: number; theta?: number; vega?: number; rho?: number };
+export type OptionLeg = {
+  id: string;
+  optionType: OptionType;
+  side: Side;
+  strike: number;
+  premium: number;
+  quantity: number;
+  multiplier: number;
+  expiry: string;
+  iv: number;
+  greeks: GreekInput;
+};
+export type Costs = { openPerContract: number; closePerContract: number; settlementPerContract: number };
+export type GreekValues = { delta: number | null; gamma: number | null; theta: number | null; vega: number | null; rho: number | null };
+export type GreekRow = { id: string; values: GreekValues | null };
+export type WorkbenchState = {
+  underlying: string;
+  spot: number;
+  forward: number;
+  expiry: string;
+  multiplier: number;
+  daysToExpiry: number;
+  model: PricingModel;
+  riskFreeRate: number;
+  dividendYield: number;
+  costs: Costs;
+  greeksMode: 'MANUAL' | 'MODEL';
+  legs: OptionLeg[];
+};

@@ -1,0 +1,6 @@
+node_modules/
+dist/
+opt_eod/
+*.local
+*.tsbuildinfo
+.DS_Store
