@@ -1,5 +1,6 @@
-import type { GreekValues, OptionLeg, PricingModel } from '../models/option';
+import type { GreekInputFormat, GreekRawProfile, GreekValues, OptionLeg, PricingModel } from '../models/option';
 import { intrinsic, sign } from './payoff';
+import { normalizeGreeks } from './greeks';
 
 const SQRT2 = Math.sqrt(2), SQRT2PI = Math.sqrt(2 * Math.PI);
 function erf(x: number): number {
@@ -42,13 +43,17 @@ export function priceOption(leg: Pick<OptionLeg, 'optionType' | 'strike' | 'iv'>
   return { value, greeks: { delta, gamma, theta: thetaYear / 365, vega, rho: rhoYear } };
 }
 
-export function legGreeks(leg: OptionLeg, input: ModelInputs, mode: 'MANUAL' | 'MODEL'): GreekValues {
-  const raw = mode === 'MODEL' ? priceOption(leg, input).greeks : leg.greeks;
+export function legGreeks(leg: OptionLeg, input: ModelInputs, mode: 'MANUAL' | 'MODEL', format: GreekInputFormat = 'LEGACY_POINTS', profile?: GreekRawProfile): GreekValues {
+  if (mode === 'MANUAL') {
+    const normalized = normalizeGreeks(leg.greeks, leg.multiplier, format, profile);
+    const signQty = sign(leg.side) * leg.quantity;
+    return Object.fromEntries(Object.entries(normalized).map(([k,v]) => [k, v === null ? null : v * signQty])) as GreekValues;
+  }
+  const raw = priceOption(leg, input).greeks;
   if (!raw) return { delta: null, gamma: null, theta: null, vega: null, rho: null };
-  const scale = sign(leg.side) * leg.quantity * leg.multiplier;
-  const asNum = (x: number | null | undefined) => { if (x === undefined || x === null || !Number.isFinite(x)) return null; const value=x*scale; return Number.isFinite(value)?value:null; };
-  const vega = asNum(raw.vega), rho = asNum(raw.rho);
-  return { delta: asNum(raw.delta), gamma: asNum(raw.gamma), theta: asNum(raw.theta), vega: vega === null ? null : vega / 100, rho: rho === null ? null : rho / 100 };
+  const scale = sign(leg.side) * leg.quantity;
+  const asNum = (x: number | null | undefined, factor = 1) => { if (x === undefined || x === null || !Number.isFinite(x)) return null; const value=x*scale*factor; return Number.isFinite(value)?value:null; };
+  return { delta: asNum(raw.delta), gamma: asNum(raw.gamma), theta: asNum(raw.theta), vega: asNum(raw.vega, .01), rho: asNum(raw.rho, .01) };
 }
 export function aggregateGreeks(rows: GreekValues[]): GreekValues {
   const keys: (keyof GreekValues)[] = ['delta','gamma','theta','vega','rho'];

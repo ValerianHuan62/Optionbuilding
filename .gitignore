@@ -4,3 +4,5 @@ opt_eod/
 *.local
 *.tsbuildinfo
 .DS_Store
+
+.vite/

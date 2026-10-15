@@ -20,10 +20,9 @@ export function analyzePayoff(legs: OptionLeg[], costs?: Costs, pricePoints?: nu
   const isMultiExpiry = expiries.length > 1;
   const strikes = [...new Set(legs.map(l => l.strike).filter(k => Number.isFinite(k) && k >= 0))].sort((a, b) => a - b);
   const knots = [...new Set([0, ...strikes])].sort((a, b) => a - b);
-  const openFees = legs.reduce((s, l) => s + l.quantity * costs?.openPerContract!, 0);
-  const settleFees = legs.reduce((s, l) => s + l.quantity * costs?.settlementPerContract!, 0);
-  const feeTotal = (Number.isFinite(openFees) ? openFees : 0) + (Number.isFinite(settleFees) ? settleFees : 0);
-  const yAt = (x: number) => grossExpirationPnl(legs, x) - feeTotal;
+  // `costs` remains accepted for older callers, but expiration PnL is always gross.
+  void costs;
+  const yAt = (x: number) => grossExpirationPnl(legs, x);
   const breakEvens: number[] = [];
   for (let i = 0; i < knots.length; i++) {
     const x0 = knots[i], y0 = yAt(x0);

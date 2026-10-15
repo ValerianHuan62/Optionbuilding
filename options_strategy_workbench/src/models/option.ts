@@ -1,0 +1,48 @@
+export type OptionType = 'CALL' | 'PUT';
+export type Side = 'LONG' | 'SHORT';
+export type PricingModel = 'BSM' | 'BLACK76';
+export type GreekInput = { delta?: number; gamma?: number; theta?: number; vega?: number; rho?: number; source?: GreekInputFormat; snapshotAt?: string };
+export type GreekInputFormat = 'LEGACY_POINTS' | 'STANDARDIZED' | 'TONGHUASHUN_RAW' | 'KUAIQI_RAW';
+export type GreekRawProfile = { thetaUnit: 'DAY' | 'YEAR'; vegaUnit: 'IV_POINT' | 'IV_DECIMAL'; rhoUnit: 'RATE_POINT' | 'RATE_DECIMAL'; includesMultiplier: boolean };
+export type OptionContract = { contractId: string; underlying: string; optionType: OptionType; strike: number; expiry: string; multiplier: number; /** Legacy alias retained for saved v1 data and UI wiring. */ premium: number | null; marketPremium?: number | null; settlementPrice?: number | null; impliedVolatility: number | null; greeks: GreekInput };
+export type ActivePosition = { contractId: string; side: Side; quantity: number; entryPremium?: number };
+export type OptionLeg = {
+  id: string;
+  optionType: OptionType;
+  side: Side;
+  strike: number;
+  premium: number;
+  quantity: number;
+  multiplier: number;
+  expiry: string;
+  iv: number;
+  greeks: GreekInput;
+};
+export type Costs = { openPerContract: number; closePerContract: number; settlementPerContract: number };
+export type GreekValues = { delta: number | null; gamma: number | null; theta: number | null; vega: number | null; rho: number | null };
+export type GreekRow = { id: string; values: GreekValues | null };
+export type WorkbenchState = {
+  underlying: string;
+  spot: number;
+  forward: number;
+  expiry: string;
+  multiplier: number;
+  daysToExpiry: number;
+  model: PricingModel;
+  riskFreeRate: number;
+  dividendYield: number;
+  costs: Costs;
+  greeksMode: 'MANUAL' | 'MODEL';
+  /** Legacy field retained only for importing older saved files. */
+  legs?: OptionLeg[];
+  optionChain: OptionContract[];
+  activeStrategy: ActivePosition[];
+  marginParams?: { m: number; minimumRatio: number };
+  greekInputFormat?: GreekInputFormat;
+  greekRawProfile?: GreekRawProfile;
+  greekUnitsVersion?: 1;
+  savedStrategies?: SavedStrategy[];
+  activeSavedStrategyId?: string | null;
+};
+export type SavedStrategy = { id: string; name: string; underlying: string; createdAt: string; updatedAt: string; legs: SavedStrategyLeg[]; pricingSettings: Pick<WorkbenchState, 'spot' | 'forward' | 'expiry' | 'model' | 'riskFreeRate' | 'dividendYield' | 'multiplier' | 'greeksMode' | 'greekInputFormat' | 'greekRawProfile' | 'marginParams'>; transactionCosts: Costs; notes: string };
+export type SavedStrategyLeg = { contractId: string; side: Side; quantity: number; entryPremium: number; settlementPrice?: number | null };
