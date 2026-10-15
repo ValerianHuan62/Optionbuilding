@@ -49,9 +49,9 @@ describe('expiration payoff and exact analyzer', () => {
     const shortPut=analyzePayoff([leg({optionType:'PUT',side:'SHORT',premium:5})]);
     expect(shortPut.maxProfit).toBe(500); expect(shortPut.maxLoss).toBe(-9500);
   });
-  it('deducts opening and settlement costs without charging closing fees at expiry', () => {
+  it('keeps the expiration payoff gross even when cost inputs are supplied', () => {
     const a=analyzePayoff([leg()],{openPerContract:2,closePerContract:99,settlementPerContract:3});
-    expect(a.maxLoss).toBe(-1005); expect(a.points.find(p=>p.x===0)?.y).toBe(-1005);
+    expect(a.maxLoss).toBe(-1000); expect(a.points.find(p=>p.x===0)?.y).toBe(-1000);
   });
 });
 
@@ -99,11 +99,11 @@ describe('model pricing, Greeks and scenarios', () => {
     const b76=priceOption(leg({strike:100,iv:.2}),{...base,rate:3,model:'BLACK76'});
     expect(b76.value).toBeGreaterThan(0); expect(b76.greeks?.vega).toBeGreaterThan(0);
   });
-  it('handles expiry, invalid IV, and scale conversions to portfolio yuan', () => {
+  it('handles expiry, invalid IV, and raw point Greek units', () => {
     expect(priceOption(leg(),{...base,days:0}).value).toBe(0);
     expect(Number.isNaN(priceOption(leg({iv:0}),base).value)).toBe(true);
-    const values=legGreeks(leg({greeks:{delta:.5,gamma:.01,theta:-.02,vega:4,rho:6}}),base,'MANUAL');
-    expect(values.delta).toBe(50); expect(values.vega).toBe(4); expect(values.rho).toBe(6);
+    const values=legGreeks(leg({greeks:{delta:.5,gamma:.01,theta:-.02,vega:4,rho:6}}),base,'MANUAL','KUAIQI_RAW');
+    expect(values.delta).toBe(.5); expect(values.vega).toBe(4); expect(values.rho).toBe(6);
     expect(aggregateGreeks([values,{...values,delta:null}]).delta).toBeNull();
     expect(aggregateGreeks([]).vega).toBeNull();
   });

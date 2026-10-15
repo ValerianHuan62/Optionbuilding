@@ -23,6 +23,7 @@ export type GreekValues = { delta: number | null; gamma: number | null; theta: n
 export type GreekRow = { id: string; values: GreekValues | null };
 export type WorkbenchState = {
   underlying: string;
+  valuationDate?: string;
   spot: number;
   forward: number;
   expiry: string;
@@ -44,5 +45,5 @@ export type WorkbenchState = {
   savedStrategies?: SavedStrategy[];
   activeSavedStrategyId?: string | null;
 };
-export type SavedStrategy = { id: string; name: string; underlying: string; createdAt: string; updatedAt: string; legs: SavedStrategyLeg[]; pricingSettings: Pick<WorkbenchState, 'spot' | 'forward' | 'expiry' | 'model' | 'riskFreeRate' | 'dividendYield' | 'multiplier' | 'greeksMode' | 'greekInputFormat' | 'greekRawProfile' | 'marginParams'>; transactionCosts: Costs; notes: string };
+export type SavedStrategy = { id: string; name: string; underlying: string; createdAt: string; updatedAt: string; legs: SavedStrategyLeg[]; pricingSettings: Pick<WorkbenchState, 'valuationDate' | 'spot' | 'forward' | 'expiry' | 'model' | 'riskFreeRate' | 'dividendYield' | 'multiplier' | 'greeksMode' | 'greekInputFormat' | 'greekRawProfile' | 'marginParams'>; transactionCosts: Costs; notes: string };
 export type SavedStrategyLeg = { contractId: string; side: Side; quantity: number; entryPremium: number; settlementPrice?: number | null };

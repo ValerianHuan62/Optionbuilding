@@ -55,17 +55,17 @@ describe('CFFEX short-option margin assumptions',()=>{
 });
 
 describe('Greek source unit profiles',()=>{
-  it('uses fast-futures raw point units and applies the contract multiplier once',()=>{
+  it('keeps fast-futures raw point units without applying the contract multiplier',()=>{
     const result=normalizeGreeks({delta:.4531,gamma:.00113,theta:-1.04,vega:3.28,rho:2.5},100,'KUAIQI_RAW');
-    expect(result.delta).toBeCloseTo(45.31,8); expect(result.gamma).toBeCloseTo(.113,8);
-    expect(result.theta).toBe(-104); expect(result.vega).toBe(328); expect(result.rho).toBe(250);
+    expect(result.delta).toBeCloseTo(.4531,8); expect(result.gamma).toBeCloseTo(.00113,8);
+    expect(result.theta).toBe(-1.04); expect(result.vega).toBe(3.28); expect(result.rho).toBe(2.5);
   });
   it('migrates saved legacy Greeks into the new fixed raw-point input units',()=>{
     const chain=[contract({greeks:{delta:.5,gamma:.002,theta:-1.2,vega:450,rho:200,source:'LEGACY_POINTS'}})];
     const migrated=migrateWorkbenchState({...defaults,optionChain:chain},defaults);
     expect(migrated.greekInputFormat).toBe('KUAIQI_RAW');
     expect(migrated.optionChain[0].greeks).toMatchObject({delta:.5,gamma:.002,theta:-1.2,vega:4.5,rho:2,source:'KUAIQI_RAW'});
-    expect(normalizeGreeks(migrated.optionChain[0].greeks,100,migrated.greekInputFormat)).toMatchObject({delta:50,gamma:.2,theta:-120,vega:450,rho:200});
+    expect(normalizeGreeks(migrated.optionChain[0].greeks,100,migrated.greekInputFormat)).toMatchObject({delta:.5,gamma:.002,theta:-1.2,vega:4.5,rho:2});
   });
   it('repairs the first unversioned quick-unit snapshot without rescaling Vega or Rho',()=>{
     const chain=[contract({greeks:{delta:.00509,gamma:.0000209,theta:-.0127,vega:4.92,rho:2,source:'KUAIQI_RAW'}})];
@@ -73,19 +73,48 @@ describe('Greek source unit profiles',()=>{
     expect(migrated.optionChain[0].greeks).toMatchObject({delta:.509,gamma:.00209,theta:-1.27,vega:4.92,rho:2,source:'KUAIQI_RAW'});
     expect(migrated.greekUnitsVersion).toBe(1);
   });
-  it('normalizes raw delta, theta, vega and rho with one multiplier conversion',()=>{
+  it('normalizes yearly and decimal raw Greeks to point units',()=>{
     const result=normalizeGreeks({delta:.4531,theta:-5123.2955,vega:251.0965,rho:26.6675},100,'TONGHUASHUN_RAW',{thetaUnit:'YEAR',vegaUnit:'IV_DECIMAL',rhoUnit:'RATE_DECIMAL',includesMultiplier:false});
-    expect(result.delta).toBeCloseTo(45.31,8);
-    expect(result.theta).toBeCloseTo(-1403.6426,3);
-    expect(result.vega).toBeCloseTo(251.0965,8);
-    expect(result.rho).toBeCloseTo(26.6675,8);
+    expect(result.delta).toBeCloseTo(.4531,8);
+    expect(result.theta).toBeCloseTo(-5123.2955/365,8);
+    expect(result.vega).toBeCloseTo(2.510965,8);
+    expect(result.rho).toBeCloseTo(.266675,8);
   });
-  it('does not reapply multiplier to standardized single-contract CNY values',()=>{
-    expect(normalizeGreeks({delta:45.31,vega:251.0965},100,'STANDARDIZED')).toMatchObject({delta:45.31,vega:251.0965});
+  it('converts standardized single-contract CNY values back to point units once',()=>{
+    const result=normalizeGreeks({delta:45.31,vega:251.0965},100,'STANDARDIZED');
+    expect(result.delta).toBeCloseTo(.4531,8);
+    expect(result.vega).toBeCloseTo(2.510965,8);
   });
 });
 
 describe('revalued scenario PnL',()=>{
+  it('reprices the reported MO bear call spread with T0=2/365 and T1=1/365',()=>{
+    const short=leg({id:'short-7000',side:'SHORT',strike:7000,premium:39.4,iv:.3804,expiry:'2026-10-16'});
+    const long=leg({id:'long-7200',strike:7200,premium:6.4,iv:.3885,expiry:'2026-10-16'});
+    const spot=6905.17*.95;
+    const input={spot,forward:spot,valuationDate:'2026-10-14',daysToExpiryByLeg:undefined,daysForward:1,ivShift:.08,rate:1.65,dividend:1.1,model:'BSM' as const};
+    const shortMark=priceOption({...short,iv:.4604},{spot,forward:spot,rate:1.65,dividend:1.1,days:1,model:'BSM'}).value;
+    const longMark=priceOption({...long,iv:.4685},{spot,forward:spot,rate:1.65,dividend:1.1,days:1,model:'BSM'}).value;
+    const pnl=scenarioPnl([short,long],input);
+    const todayPnl=scenarioPnl([short,long],{...input,daysForward:0});
+    const shortToday=priceOption({...short,iv:.4604},{spot,forward:spot,rate:1.65,dividend:1.1,days:2,model:'BSM'}).value;
+    const longToday=priceOption({...long,iv:.4685},{spot,forward:spot,rate:1.65,dividend:1.1,days:2,model:'BSM'}).value;
+    expect(todayPnl).toBeCloseTo((33-shortToday+longToday)*100,6);
+    expect(pnl).toBeCloseTo((33-shortMark+longMark)*100,6);
+    expect(pnl).toBeGreaterThan(3200);
+    expect(pnl).toBeLessThan(3300);
+    expect(scenarioPnl([short,long],{...input,daysForward:2})).toBe(3300);
+  });
+  it('keeps BSM dividend carry and Black-76 forward carry consistent at the same horizon',()=>{
+    const l=leg({strike:100,iv:.3,expiry:'2026-10-16'});
+    const input=scenario({spot:102,forward:102*Math.exp((.02-.01)/365),valuationDate:'2026-10-14',daysToExpiryByLeg:undefined,daysForward:1,rate:2,dividend:1});
+    expect(scenarioPnl([l],input)).toBeCloseTo(scenarioPnl([l],{...input,model:'BLACK76'})!,8);
+  });
+  it('rejects an inconsistent strike-IV surface instead of exceeding spread maximum profit',()=>{
+    const short=leg({id:'short',side:'SHORT',strike:100,premium:10,iv:.05,expiry:'2026-10-16'});
+    const long=leg({id:'long',strike:120,premium:1,iv:2,expiry:'2026-10-16'});
+    expect(scenarioPnl([short,long],scenario({valuationDate:'2026-10-14',daysToExpiryByLeg:undefined,daysForward:1}))).toBeNull();
+  });
   it('maps IV 25% + 3pp to 28%',()=>{
     const l=leg();
     const actual=scenarioPnl([l],scenario({ivShift:.03}))!;
