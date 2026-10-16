@@ -11,11 +11,11 @@ export type RankMetric = 'EXPECTED' | 'EXPECTED_LOSS' | 'EXPECTED_MARGIN';
 export type Scenario = { id: string; name: string; movePct: number; ivPp: number; days: number; probability: number };
 export type Limit = { enabled: boolean; value: number };
 export type OptimizerLimits = { maxLoss: Limit; maxMargin: Limit; maxScenarioLoss: Limit; maxDelta: Limit; maxGamma: Limit; maxVega: Limit; maxSpread: Limit; minVolume: Limit; minOpenInterest: Limit; maxLegs: Limit };
-export type OptimizerSettings = { underlying: string; expiry: string; strategy: StrategyKind; entryMode: EntryMode; strikeMin: number; strikeMax: number; widthMin: number; widthMax: number; shortAtmMin: number; shortAtmMax: number; asymmetric: boolean; scenarios: Scenario[]; limits: OptimizerLimits; costs: Costs };
+export type OptimizerSettings = { greekUnitsVersion: 2; underlying: string; expiry: string; strategy: StrategyKind; entryMode: EntryMode; strikeMin: number; strikeMax: number; widthMin: number; widthMax: number; shortAtmMin: number; shortAtmMax: number; asymmetric: boolean; scenarios: Scenario[]; limits: OptimizerLimits; costs: Costs };
 export type Position = { contract: OptionContract; side: Side };
-export type CashGreeks = { delta: number; gamma: number; theta: number; vega: number; rho: number };
-export type ScenarioMark = { value: number; greeks: CashGreeks | null };
-export type Candidate = { id: string; positions: Position[]; legs: OptionLeg[]; payoff: PayoffAnalysis; entryPnl: 0; netPremium: number; maxProfit: number | 'UNLIMITED'; maxLoss: number | 'UNLIMITED'; margin: number | null; entryFees: number; exitFees: number; settlementFees: number; scenarioPnls: number[]; scenarioGreeks: (CashGreeks | null)[]; entryGreeks: (CashGreeks | null)[]; baseGreeks: CashGreeks; reversalCount: number; maxAbsGreeks: CashGreeks; worstScenario: number; breakEvens: number[] };
+export type PointGreeks = { delta: number; gamma: number; theta: number; vega: number; rho: number };
+export type ScenarioMark = { value: number; greeks: PointGreeks | null };
+export type Candidate = { id: string; positions: Position[]; legs: OptionLeg[]; payoff: PayoffAnalysis; entryPnl: 0; netPremium: number; maxProfit: number | 'UNLIMITED'; maxLoss: number | 'UNLIMITED'; margin: number | null; entryFees: number; exitFees: number; settlementFees: number; scenarioPnls: number[]; scenarioGreeks: (PointGreeks | null)[]; entryGreeks: (PointGreeks | null)[]; baseGreeks: PointGreeks; reversalCount: number; maxAbsGreeks: PointGreeks; worstScenario: number; breakEvens: number[] };
 export type Counts = { enumerated: number; structure: number; quotes: number; pricing: number; risk: number; ranked: number; reasons: Record<string, number> };
 export type Prepared = { settings: OptimizerSettings; state: WorkbenchState; contracts: OptionContract[]; marks: Map<string, ScenarioMark[]>; baseMarks: Map<string, ScenarioMark>; counts: Counts; daysToExpiry: number };
 export type ScoredCandidate = Candidate & { expected: number; expectedLoss: number | null; expectedMargin: number | null; profitableWeight: number; rank: number };
@@ -32,9 +32,18 @@ export const DEFAULT_SCENARIOS: Scenario[] = [
 const limit = (enabled: boolean, value: number): Limit => ({ enabled, value });
 export function defaultSettings(state: WorkbenchState): OptimizerSettings {
   const width = Math.max(50, Math.round(state.spot * .03 / 50) * 50);
-  return { underlying: state.underlying, expiry: state.expiry, strategy: 'BEAR_CALL', entryMode: 'EXECUTABLE', strikeMin: 0, strikeMax: Infinity, widthMin: 1, widthMax: width * 3, shortAtmMin: 0, shortAtmMax: Infinity, asymmetric: true, scenarios: DEFAULT_SCENARIOS.map(x => ({ ...x })), costs: { ...state.costs }, limits: {
-    maxLoss: limit(true, 30000), maxMargin: limit(true, 150000), maxScenarioLoss: limit(true, 25000), maxDelta: limit(false, 100), maxGamma: limit(false, 10), maxVega: limit(false, 1000), maxSpread: limit(true, 10), minVolume: limit(true, 1), minOpenInterest: limit(true, 1), maxLegs: limit(false, 4),
+  return { greekUnitsVersion: 2, underlying: state.underlying, expiry: state.expiry, strategy: 'BEAR_CALL', entryMode: 'EXECUTABLE', strikeMin: 0, strikeMax: Infinity, widthMin: 1, widthMax: width * 3, shortAtmMin: 0, shortAtmMax: Infinity, asymmetric: true, scenarios: DEFAULT_SCENARIOS.map(x => ({ ...x })), costs: { ...state.costs }, limits: {
+    maxLoss: limit(true, 30000), maxMargin: limit(true, 150000), maxScenarioLoss: limit(true, 25000), maxDelta: limit(false, 1), maxGamma: limit(false, .01), maxVega: limit(false, 10), maxSpread: limit(true, 10), minVolume: limit(true, 1), minOpenInterest: limit(true, 1), maxLegs: limit(false, 4),
   } };
+}
+/** Saved v1 risk limits were cash Greeks; the workbench displays Greeks in option points. */
+export function migrateGreekLimits(limits: OptimizerLimits, multiplier: number, alreadyPointBased: boolean): OptimizerLimits {
+  if (alreadyPointBased || !Number.isFinite(multiplier) || multiplier <= 0) return limits;
+  return { ...limits,
+    maxDelta: { ...limits.maxDelta, value: limits.maxDelta.value / multiplier },
+    maxGamma: { ...limits.maxGamma, value: limits.maxGamma.value / multiplier },
+    maxVega: { ...limits.maxVega, value: limits.maxVega.value / multiplier },
+  };
 }
 export function validateProbabilities(scenarios: Scenario[]): string | null {
   if (!scenarios.length) return '至少保留一个情景。';
@@ -64,14 +73,14 @@ export function validateSettings(settings: OptimizerSettings, state: WorkbenchSt
   return null;
 }
 const calendarDays = (expiry: string, valuation?: string) => (Date.parse(`${expiry}T00:00:00Z`) - Date.parse(`${valuation ?? new Date().toISOString().slice(0,10)}T00:00:00Z`)) / 86400000;
-const emptyGreeks = (): CashGreeks => ({ delta: 0, gamma: 0, theta: 0, vega: 0, rho: 0 });
-const addGreeks = (sum: CashGreeks, item: CashGreeks | null, scale: number) => { if (!item) return; for (const key of Object.keys(sum) as (keyof CashGreeks)[]) sum[key] += item[key] * scale; };
-const cashGreeks = (raw: NonNullable<ReturnType<typeof priceOption>['greeks']>, multiplier: number): CashGreeks => ({ delta: raw.delta! * multiplier, gamma: raw.gamma! * multiplier, theta: raw.theta! * multiplier, vega: raw.vega * .01 * multiplier, rho: raw.rho! * .01 * multiplier });
+const emptyGreeks = (): PointGreeks => ({ delta: 0, gamma: 0, theta: 0, vega: 0, rho: 0 });
+const addGreeks = (sum: PointGreeks, item: PointGreeks | null, scale: number) => { if (!item) return; for (const key of Object.keys(sum) as (keyof PointGreeks)[]) sum[key] += item[key] * scale; };
+const pointGreeks = (raw: NonNullable<ReturnType<typeof priceOption>['greeks']>): PointGreeks => ({ delta: raw.delta!, gamma: raw.gamma!, theta: raw.theta!, vega: raw.vega * .01, rho: raw.rho! * .01 });
 const record = (counts: Counts, reason: string) => { counts.reasons[reason] = (counts.reasons[reason] ?? 0) + 1; };
-export function greekRiskSummary(base: CashGreeks, scenarios: (CashGreeks | null)[]) {
+export function greekRiskSummary(base: PointGreeks, scenarios: (PointGreeks | null)[]) {
   const maxAbs=emptyGreeks();let reversals=0;
   for(const g of scenarios) {if(!g)continue;let reversed=false;
-    for(const key of Object.keys(g) as (keyof CashGreeks)[]) {maxAbs[key]=Math.max(maxAbs[key],Math.abs(g[key]));if(key!=='rho'&&Math.abs(base[key])>1e-10&&Math.abs(g[key])>1e-10&&Math.sign(base[key])!==Math.sign(g[key]))reversed=true;}
+    for(const key of Object.keys(g) as (keyof PointGreeks)[]) {maxAbs[key]=Math.max(maxAbs[key],Math.abs(g[key]));if(key!=='rho'&&Math.abs(base[key])>1e-10&&Math.abs(g[key])>1e-10&&Math.sign(base[key])!==Math.sign(g[key]))reversed=true;}
     if(reversed)reversals++;
   }
   return {reversals,maxAbs};
@@ -93,7 +102,7 @@ export function prepareOptimization(state: WorkbenchState, settings: OptimizerSe
     if (!Number.isFinite(c.impliedVolatility)||c.impliedVolatility!<=0) continue;
     const valueAt = (spot: number, iv: number, days: number): ScenarioMark => {
       const quote=priceOption({optionType:c.optionType,strike:c.strike,iv},{spot,rate:state.riskFreeRate,dividend,days});
-      return {value:quote.value,greeks:quote.greeks?cashGreeks(quote.greeks,c.multiplier):null};
+      return {value:quote.value,greeks:quote.greeks?pointGreeks(quote.greeks):null};
     };
     const base=valueAt(state.spot,c.impliedVolatility!,daysToExpiry);
     if (!Number.isFinite(base.value)) continue;
@@ -183,7 +192,7 @@ export function evaluateCandidate(prep: Prepared, positions: Position[]): Candid
   positions.forEach((p,i)=>addGreeks(baseGreeks,entryGreeks[i],sign(p.side)));
   const marginRows=positions.filter(p=>p.side==='SHORT').map(p=>marginForContract(p.contract,{side:'SHORT',quantity:1},state.spot,state.marginParams??{m:.12,minimumRatio:.5}));
   const margin=marginRows.every(x=>x?.amount!=null)?marginRows.reduce((sum,x)=>sum+x!.amount!,0):null;
-  const pnls:number[]=[],scenarioGreeks:(CashGreeks|null)[]=[];
+  const pnls:number[]=[],scenarioGreeks:(PointGreeks|null)[]=[];
   for(let i=0;i<settings.scenarios.length;i++) {
     const scenario=settings.scenarios[i], remaining=prep.daysToExpiry-scenario.days, marks=new Map<string,ScenarioMark>();
     positions.forEach(p=>marks.set(p.contract.contractId,prep.marks.get(p.contract.contractId)?.[i]??{value:NaN,greeks:null}));

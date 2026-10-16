@@ -3,7 +3,7 @@ import type { OptionContract, WorkbenchState } from '../models/option';
 import * as pricing from '../engine/pricing';
 import { grossExpirationPnl } from '../engine/payoff';
 import { scenarioPnl } from '../engine/scenario';
-import { defaultSettings, enumerateStructures, evaluateCandidate, greekRiskSummary, loadCandidate, prepareOptimization, rankCandidates, robustness, sampleProbabilities, shiftProbability, validateProbabilities, type OptimizerSettings } from '../engine/optimizer';
+import { defaultSettings, enumerateStructures, evaluateCandidate, greekRiskSummary, loadCandidate, migrateGreekLimits, prepareOptimization, rankCandidates, robustness, sampleProbabilities, shiftProbability, validateProbabilities, type OptimizerSettings } from '../engine/optimizer';
 import { parseOptionChainText } from '../utils/optionChain';
 
 const makeState=():WorkbenchState=>{
@@ -26,6 +26,29 @@ const candidates=(state=makeState(),settings=getSettings(state))=>{
 };
 
 describe('Strike Optimizer',()=>{
+  it('uses the main workbench Greek units at entry and after a BSM scenario repricing',()=>{
+    const state=makeState(),settings=getSettings(state),candidate=candidates(state,settings)[0];
+    expect(candidate).toBeDefined();
+    const sum=(days:number,spot:number,ivShift:number)=>pricing.aggregateGreeks(candidate.legs.map(leg=>pricing.legGreeks({...leg,iv:leg.iv+ivShift},{spot,days,rate:state.riskFreeRate,dividend:state.dividendYield})));
+    const initial=sum(16,state.spot,0),scenario=settings.scenarios[0],shifted=sum(16-scenario.days,state.spot*(1+scenario.movePct/100),scenario.ivPp/100);
+    for(const key of ['delta','gamma','theta','vega','rho'] as const){
+      expect(candidate.baseGreeks[key]).toBeCloseTo(initial[key]!,8);
+      expect(candidate.scenarioGreeks[0]![key]).toBeCloseTo(shifted[key]!,8);
+    }
+  });
+  it('migrates old cash Greek risk thresholds once',()=>{
+    const old=defaultSettings(makeState()).limits;old.maxDelta={enabled:true,value:100};old.maxGamma={enabled:true,value:1};old.maxVega={enabled:true,value:200};
+    const migrated=migrateGreekLimits(old,100,false);
+    expect([migrated.maxDelta.value,migrated.maxGamma.value,migrated.maxVega.value]).toEqual([1,.01,2]);
+    expect(migrateGreekLimits(migrated,100,true)).toBe(migrated);
+  });
+  it('applies the Delta budget in the same raw units shown on screen',()=>{
+    const state=makeState(),settings=getSettings(state),prepared=prepareOptimization(state,settings);
+    const positions=[...enumerateStructures(prepared)][0],candidate=evaluateCandidate(prepared,positions)!;
+    expect(Math.abs(candidate.baseGreeks.delta)).toBeGreaterThan(0);
+    settings.limits.maxDelta={enabled:true,value:Math.abs(candidate.baseGreeks.delta)/2};
+    expect(evaluateCandidate(prepareOptimization(state,settings),positions)).toBeNull();
+  });
   it('orders Bear Call short lower / long higher and uses real contract codes',()=>{
     const state=makeState(),settings=getSettings(state),prepared=prepareOptimization(state,settings);
     const structures=[...enumerateStructures(prepared)];expect(structures.length).toBeGreaterThan(0);
