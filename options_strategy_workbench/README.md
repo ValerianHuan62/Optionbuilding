@@ -11,6 +11,21 @@ npm install
 npm run dev
 ```
 
+## 执行价组合优化器
+
+顶部切换到「执行价优化器」即可进入独立页面。它沿用当前浏览器保存的期权链、现货、估值日、BSM 利率与固定股息率，不会改动已有的策略库。优化器支持十种价差、铁鹰/铁蝶及跨式/宽跨式结构；买腿默认 Ask、卖腿默认 Bid。缺少有效 Bid/Ask 的组合不进入正式排名。Mid 模式只用于理论研究，页面会持续标明其价格口径。
+
+当前浏览器不直接连接 PostgreSQL。已有 MO 数据库可先导出同日同到期的真实合约快照，然后在优化器页面导入：
+
+```sh
+cd ../mo_options_data_system
+uv run python ../options_strategy_workbench/scripts/export_optimizer_chain.py --date 2026-10-08 --expiry 2026-10-16 --output /private/tmp/mo_optimizer_chain.csv
+```
+
+导出脚本只读 `contracts`、`option_daily`、`market_daily` 和 `option_greeks_daily`；CSV 保留真实合约代码、Bid/Ask、Mid、Last、成交量、持仓量、结算价和报价状态。MO IV 会用当日 Mid、SHIBOR 利率和工作台固定的 1.1% 股息率重新反解，无法反解时保持空值；数据库原 IV 不被修改。日期须存在于数据库。浏览器导入后会更新当前估值日、现货和利率；原有已保存组合保留。HO、IO 也可按页面支持的同列 CSV 格式导入。
+
+主观加权 PnL = Σ(情景概率 × BSM 逐腿重估 PnL)，默认排序为该值除以有限且正的最大亏损。改动概率只对已缓存的合约情景价格矩阵加权；改动指数、IV、时间或搜索约束需要重新运行搜索。稳健性模拟使用固定种子，在概率单纯形上成对转移概率，默认 1000 组；其正加权 PnL 比例不等于真实交易胜率。保证金沿用工作台卖方逐腿公式，属于估计值，没有组合优惠。
+
 生产构建与检查：
 
 ```sh

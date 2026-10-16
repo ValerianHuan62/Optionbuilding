@@ -77,13 +77,18 @@ export function migrateWorkbenchState(raw: Partial<WorkbenchState> & { legs?: Op
 }
 
 export type ChainImportContext = { underlying: string; expiry: string; multiplier: number; greekInputFormat?: GreekInputFormat };
-export type ChainImportPreview = { rows: OptionContract[]; errors: string[]; warnings?: string[]; expiry?: string; underlying?: string };
+export type ChainImportPreview = { rows: OptionContract[]; errors: string[]; warnings?: string[]; expiry?: string; underlying?: string; valuationDate?: string; spot?: number; riskFreeRate?: number };
 const headerAliases: Record<string, string> = {
   calliv: 'calliv', putiv: 'putiv', callimpliedvolatility: 'calliv', putimpliedvolatility: 'putiv',
   callpremium: 'callpremium', putpremium: 'putpremium', callprice: 'callpremium', putprice: 'putpremium',
+  callmid: 'callpremium', putmid: 'putpremium',
   strike: 'strike', k: 'strike',
   callsettlementprice: 'callsettlementprice', putsettlementprice: 'putsettlementprice',
   callsettlement: 'callsettlementprice', putsettlement: 'putsettlementprice',
+  callinstrumentid: 'callcontractid', putinstrumentid: 'putcontractid',
+  callcode: 'callcontractid', putcode: 'putcontractid',
+  calloi: 'callopeninterest', putoi: 'putopeninterest',
+  callexchangevolume: 'callvolume', putexchangevolume: 'putvolume',
 };
 const normalizedHeader = (header: string) => {
   const key = header.trim().replace(/[ _-]/g, '').toLowerCase();
@@ -124,6 +129,11 @@ function parseTTable(table: string[][], context: ChainImportContext): ChainImpor
   };
   const greekColumn = (side: 'CALL' | 'PUT', greek: string) => column(side, header => header.trim().toLowerCase() === greek);
   const midPriceColumn = (side: 'CALL' | 'PUT') => column(side, header => /中间价|中间价格/.test(header));
+  const bidColumn = (side: 'CALL' | 'PUT') => column(side, header => /买一价|买价|^bid$/i.test(header));
+  const askColumn = (side: 'CALL' | 'PUT') => column(side, header => /卖一价|卖价|^ask$/i.test(header));
+  const lastColumn = (side: 'CALL' | 'PUT') => column(side, header => /最新价|^last$/i.test(header));
+  const volumeColumn = (side: 'CALL' | 'PUT') => column(side, header => /成交量|^volume$/i.test(header));
+  const oiColumn = (side: 'CALL' | 'PUT') => column(side, header => /持仓量|^oi$|^open.interest$/i.test(header));
   const callMid = midPriceColumn('CALL'), putMid = midPriceColumn('PUT');
   const callPriceColumn = callMid, putPriceColumn = putMid;
   // The T-table also contains historical volatility, which is not option IV.
@@ -168,9 +178,12 @@ function parseTTable(table: string[][], context: ChainImportContext): ChainImpor
     (['CALL', 'PUT'] as const).forEach(type => {
       const side = type === 'CALL' ? 'CALL' : 'PUT';
       const price = numberAt(cells, side === 'CALL' ? callPriceColumn : putPriceColumn);
+      const bid = numberAt(cells, bidColumn(side)), ask = numberAt(cells, askColumn(side));
+      const last = numberAt(cells, lastColumn(side)), volume = numberAt(cells, volumeColumn(side)), openInterest = numberAt(cells, oiColumn(side));
       const ivIndex = side === 'CALL' ? callIvColumn : putIvColumn;
       const rawIv = numberAt(cells, ivIndex, true);
       if (price !== null && (!Number.isFinite(price) || price < 0)) { errors.push(`第 ${line} 行 ${side}：中间价不是有效的非负数。`); return; }
+      if ([bid,ask,last,volume,openInterest].some(v=>v!==null&&(!Number.isFinite(v)||v<0))) { errors.push(`第 ${line} 行 ${side}：报价或成交数据无效。`); return; }
       if (rawIv !== null && (!Number.isFinite(rawIv) || rawIv < 0)) { errors.push(`第 ${line} 行 ${side}：IV 不是有效的非负数。`); return; }
       const iv = rawIv === 0 ? null : rawIv;
       if (rawIv === 0) zeroIvCount++;
@@ -183,7 +196,7 @@ function parseTTable(table: string[][], context: ChainImportContext): ChainImpor
       const hasGreekValues = Object.values(greeks).some(value => value !== undefined);
       const contractId = contractIdFor(underlying, rowExpiry, type, strike);
       contracts.push({ contractId, underlying, optionType: type, strike, expiry: rowExpiry, multiplier: context.multiplier,
-        premium: price, marketPremium: price, settlementPrice: null, impliedVolatility: iv,
+        premium: price, marketPremium: price, settlementPrice: null, bid, ask, last, volume, openInterest, impliedVolatility: iv,
         greeks: hasGreekValues ? { ...greeks, source: 'KUAIQI_RAW', snapshotAt } : greeks });
     });
   });
@@ -216,8 +229,16 @@ export function parseOptionChainText(text: string, context: ChainImportContext):
       const premium = numberAt(cells, `${side}premium`), ivPercent = numberAt(cells, `${side}iv`), parsedIv = ivPercent === null ? null : ivPercent / 100;
       const iv = parsedIv === 0 ? null : parsedIv;
       const settlementPrice = numberAt(cells, `${side}settlementprice`);
+      const bid = numberAt(cells, `${side}bid`), ask = numberAt(cells, `${side}ask`);
+      const last = numberAt(cells, `${side}last`), volume = numberAt(cells, `${side}volume`);
+      const openInterest = numberAt(cells, `${side}openinterest`);
+      const idColumn = headers.indexOf(`${side}contractid`);
+      const sourceContractId = idColumn < 0 ? null : cells[idColumn]?.trim();
+      if (idColumn >= 0 && !sourceContractId) return;
+      if (idColumn < 0 && premium === null && bid === null && ask === null && parsedIv === null) return;
       if (premium !== null && (!Number.isFinite(premium) || premium < 0)) { errors.push(`第 ${line} 行 ${type}：权利金不是有效的非负数。`); return; }
       if (settlementPrice !== null && (!Number.isFinite(settlementPrice) || settlementPrice < 0)) { errors.push(`第 ${line} 行 ${type}：结算价不是有效的非负数。`); return; }
+      if ([bid,ask,last,volume,openInterest].some(v=>v!==null&&(!Number.isFinite(v)||v<0))) { errors.push(`第 ${line} 行 ${type}：报价或成交数据无效。`); return; }
       if (parsedIv !== null && (!Number.isFinite(parsedIv) || parsedIv < 0)) { errors.push(`第 ${line} 行 ${type}：IV 不是有效的非负数。`); return; }
       if (parsedIv === 0) zeroIvCount++;
       const greeks: GreekInput = {};
@@ -227,12 +248,21 @@ export function parseOptionChainText(text: string, context: ChainImportContext):
         else if (value !== null) errors.push(`第 ${line} 行 ${type} ${key} 不是有效数字。`);
       });
       const hasGreekValues=Object.values(greeks).some(value=>value!==undefined);
-      contracts.push({ contractId: contractIdFor(context.underlying, context.expiry, type, strike), underlying: context.underlying,
-        optionType: type, strike, expiry: context.expiry, multiplier: context.multiplier, premium, marketPremium:premium, settlementPrice, impliedVolatility: iv, greeks: hasGreekValues ? { ...greeks, source: context.greekInputFormat ?? 'KUAIQI_RAW', snapshotAt } : greeks });
+      const rowExpiry = headers.includes('expiry') ? cells[headers.indexOf('expiry')]?.trim() || context.expiry : context.expiry;
+      const underlying = headers.includes('underlying') ? cells[headers.indexOf('underlying')]?.trim() || context.underlying : context.underlying;
+      contracts.push({ contractId: sourceContractId || contractIdFor(underlying, rowExpiry, type, strike), underlying,
+        optionType: type, strike, expiry: rowExpiry, multiplier: context.multiplier, premium:premium ?? (bid!==null&&ask!==null?(bid+ask)/2:null), marketPremium:premium ?? (bid!==null&&ask!==null?(bid+ask)/2:null), settlementPrice,
+        bid,ask,last,volume,openInterest,quoteStatus: headers.includes(`${side}quotestatus`) ? cells[headers.indexOf(`${side}quotestatus`)]?.trim() : null,
+        impliedVolatility: iv, greeks: hasGreekValues ? { ...greeks, source: context.greekInputFormat ?? 'KUAIQI_RAW', snapshotAt } : greeks });
     });
   });
   if (zeroIvCount) warnings.push(`${zeroIvCount} 个合约的 IV 显示为 0，按缺失值 N/A 导入；之后上传有效 IV 可更新。`);
-  return { rows: contracts, errors, warnings };
+  const first = table[1], firstNumber = (name:string) => { const value=first[headers.indexOf(name)]; const n=Number(value); return value&&Number.isFinite(n)?n:undefined; };
+  return { rows: contracts, errors, warnings,
+    expiry: headers.includes('expiry')?first[headers.indexOf('expiry')]?.trim():undefined,
+    underlying: headers.includes('underlying')?first[headers.indexOf('underlying')]?.trim():undefined,
+    valuationDate: headers.includes('tradedate')?first[headers.indexOf('tradedate')]?.trim():undefined,
+    spot:firstNumber('spot'),riskFreeRate:firstNumber('riskfreerate') };
 }
 
 export function legsFromChain(chain: OptionContract[], positions: ActivePosition[]): OptionLeg[] {

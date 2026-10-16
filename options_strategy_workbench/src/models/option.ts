@@ -3,7 +3,7 @@ export type Side = 'LONG' | 'SHORT';
 export type GreekInput = { delta?: number; gamma?: number; theta?: number; vega?: number; rho?: number; source?: GreekInputFormat; snapshotAt?: string };
 export type GreekInputFormat = 'LEGACY_POINTS' | 'STANDARDIZED' | 'TONGHUASHUN_RAW' | 'KUAIQI_RAW';
 export type GreekRawProfile = { thetaUnit: 'DAY' | 'YEAR'; vegaUnit: 'IV_POINT' | 'IV_DECIMAL'; rhoUnit: 'RATE_POINT' | 'RATE_DECIMAL'; includesMultiplier: boolean };
-export type OptionContract = { contractId: string; underlying: string; optionType: OptionType; strike: number; expiry: string; multiplier: number; /** Legacy alias retained for saved v1 data and UI wiring. */ premium: number | null; marketPremium?: number | null; settlementPrice?: number | null; impliedVolatility: number | null; greeks: GreekInput };
+export type OptionContract = { contractId: string; underlying: string; optionType: OptionType; strike: number; expiry: string; multiplier: number; /** Legacy alias retained for saved v1 data and UI wiring. */ premium: number | null; marketPremium?: number | null; settlementPrice?: number | null; bid?: number | null; ask?: number | null; last?: number | null; volume?: number | null; openInterest?: number | null; quoteStatus?: string | null; impliedVolatility: number | null; greeks: GreekInput };
 export type ActivePosition = { contractId: string; side: Side; quantity: number; entryPremium?: number };
 export type OptionLeg = {
   id: string;
