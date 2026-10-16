@@ -14,7 +14,7 @@ export function scenarioPnl(legs: OptionLeg[], input: ScenarioInput): number | n
     remainingDays.push(remaining);
     const iv = leg.iv + input.ivShift;
     if (remaining > 0 && iv <= 0) return null;
-    const mark = remaining === 0 ? intrinsic(leg.optionType, input.spot, leg.strike) : priceOption({ ...leg, iv }, { spot: input.spot, forward: input.forward, rate: input.rate, dividend: input.dividend, days: remaining, model: input.model }).value;
+    const mark = remaining === 0 ? intrinsic(leg.optionType, input.model === 'BLACK76' ? input.forward : input.spot, leg.strike) : priceOption({ ...leg, iv }, { spot: input.spot, forward: input.forward, rate: input.rate, dividend: input.dividend, days: remaining, model: input.model }).value;
     if (!Number.isFinite(mark)) return null;
     pnl += sign(leg.side) * (mark - leg.premium) * leg.quantity * leg.multiplier;
   }

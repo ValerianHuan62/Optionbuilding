@@ -9,6 +9,15 @@ const defaults: WorkbenchState = { underlying:'IO · 沪深300', spot:4300, forw
 const sample = `strike,callPremium,putPremium,callIV,putIV,callDelta,putDelta,callGamma,putGamma,callVega,putVega,callTheta,putTheta\n4100,224,24,18,20,0.816,-0.184,0.00113,0.00120,3.28,3.10,-1.04,-1.01\n4200,142,42,19,21,0.694,-0.306,0.00167,0.00172,4.32,4.19,-1.23,-1.20\n4300,76.2,76.2,20,22,0.509,-0.491,0.00209,0.00220,4.92,4.80,-1.27,-1.25\n4400,32.8,132.8,21,23,0.297,-0.703,0.00194,0.00188,4.27,4.01,-1.03,-0.98\n4500,11.4,211.4,22,24,0.133,-0.867,0.00124,0.00110,2.65,2.30,-0.62,-0.55`;
 
 describe('option chain ingestion and migration', () => {
+  it('reads T-table implied volatility instead of the earlier historical-volatility column', () => {
+    const tTable = `最后交易日,历史波动率,rho,theta,vega,gamma,delta,隐含波动率,中间价,MO2610 行权价 MO2610,中间价,隐含波动率,delta,gamma,vega,theta,rho,历史波动率,最后交易日
+20261016,22.19%,0.12,-17.37,1.83,0.001836,0.318,38.04%,39.4,C 7000 P,136.4,38.56%,-0.678,0.001803,1.84,-17.49,-0.26,22.19%,20261016`;
+    const preview = parseOptionChainText(tTable, { underlying: 'MO · 中证1000', expiry: '2026-10-16', multiplier: 100 });
+    expect(preview.errors).toEqual([]);
+    expect(preview.rows.find(c => c.optionType === 'CALL')?.impliedVolatility).toBeCloseTo(.3804);
+    expect(preview.rows.find(c => c.optionType === 'PUT')?.impliedVolatility).toBeCloseTo(.3856);
+  });
+
   it('previews all five call/put strikes with fast-futures raw Greek units', () => {
     const preview = parseOptionChainText(sample,{underlying:defaults.underlying,expiry:defaults.expiry,multiplier:defaults.multiplier});
     expect(preview.errors).toEqual([]);

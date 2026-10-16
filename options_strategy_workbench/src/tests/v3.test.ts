@@ -110,6 +110,12 @@ describe('revalued scenario PnL',()=>{
     const input=scenario({spot:102,forward:102*Math.exp((.02-.01)/365),valuationDate:'2026-10-14',daysToExpiryByLeg:undefined,daysForward:1,rate:2,dividend:1});
     expect(scenarioPnl([l],input)).toBeCloseTo(scenarioPnl([l],{...input,model:'BLACK76'})!,8);
   });
+  it('uses the forward coordinate for Black-76 when the scenario reaches expiry',()=>{
+    const l=leg({optionType:'CALL',strike:100,premium:5,expiry:'2026-10-16'});
+    const input=scenario({spot:90,forward:110,valuationDate:'2026-10-14',daysToExpiryByLeg:undefined,daysForward:2,model:'BLACK76'});
+    expect(scenarioPnl([l],input)).toBe(500);
+    expect(scenarioPnl([l],{...input,model:'BSM'})).toBe(-500);
+  });
   it('rejects an inconsistent strike-IV surface instead of exceeding spread maximum profit',()=>{
     const short=leg({id:'short',side:'SHORT',strike:100,premium:10,iv:.05,expiry:'2026-10-16'});
     const long=leg({id:'long',strike:120,premium:1,iv:2,expiry:'2026-10-16'});

@@ -51,15 +51,15 @@ function classifySameExpiry(xs: L[]): Strategy | null {
     if (puts.length === 2 && calls.length === 2 && orderedPuts[1].strike === orderedCalls[0].strike && orderedPuts[0].strike < orderedPuts[1].strike && orderedCalls[0].strike < orderedCalls[1].strike) {
       const [lp, sp] = orderedPuts, [sc, lc] = orderedCalls;
       const equal = [lp, sp, sc, lc].every(x => x.quantity === lp.quantity);
-      if (equal && lp.side === 'LONG' && sp.side === 'SHORT' && sc.side === 'SHORT' && lc.side === 'LONG') return { name: 'LONG IRON BUTTERFLY', chinese: '多头铁蝶式', bias: 'RANGE / VOLATILITY LONG', legs: 4 };
-      if (equal && lp.side === 'SHORT' && sp.side === 'LONG' && sc.side === 'LONG' && lc.side === 'SHORT') return { name: 'SHORT IRON BUTTERFLY', chinese: '空头铁蝶式', bias: 'RANGE / VOLATILITY SHORT', legs: 4 };
+      if (equal && lp.side === 'LONG' && sp.side === 'SHORT' && sc.side === 'SHORT' && lc.side === 'LONG') return { name: 'SHORT IRON BUTTERFLY', chinese: '空头铁蝶式', bias: 'RANGE / VOLATILITY SHORT', legs: 4 };
+      if (equal && lp.side === 'SHORT' && sp.side === 'LONG' && sc.side === 'LONG' && lc.side === 'SHORT') return { name: 'LONG IRON BUTTERFLY', chinese: '多头铁蝶式', bias: 'RANGE / VOLATILITY LONG', legs: 4 };
     }
     const lcondor = xs.length === 4 && calls.length === 2 && puts.length === 2;
     if (lcondor) {
       const byK = sorted(xs);
       const [a,b,c,d] = byK;
-      if (new Set(byK.map(x => x.strike)).size === 4 && a.optionType === 'PUT' && b.optionType === 'PUT' && c.optionType === 'CALL' && d.optionType === 'CALL' && a.side === 'LONG' && b.side === 'SHORT' && c.side === 'SHORT' && d.side === 'LONG' && [a.quantity,b.quantity,c.quantity].every(q => q === d.quantity)) return { name: 'LONG IRON CONDOR', chinese: '多头铁鹰式', bias: 'RANGE / VOLATILITY LONG', legs: 4 };
-      if (new Set(byK.map(x => x.strike)).size === 4 && a.optionType === 'PUT' && b.optionType === 'PUT' && c.optionType === 'CALL' && d.optionType === 'CALL' && a.side === 'SHORT' && b.side === 'LONG' && c.side === 'LONG' && d.side === 'SHORT' && [a.quantity,b.quantity,c.quantity].every(q => q === d.quantity)) return { name: 'SHORT IRON CONDOR', chinese: '空头铁鹰式', bias: 'RANGE / VOLATILITY SHORT', legs: 4 };
+      if (new Set(byK.map(x => x.strike)).size === 4 && a.optionType === 'PUT' && b.optionType === 'PUT' && c.optionType === 'CALL' && d.optionType === 'CALL' && a.side === 'LONG' && b.side === 'SHORT' && c.side === 'SHORT' && d.side === 'LONG' && [a.quantity,b.quantity,c.quantity].every(q => q === d.quantity)) return { name: 'SHORT IRON CONDOR', chinese: '空头铁鹰式', bias: 'RANGE / VOLATILITY SHORT', legs: 4 };
+      if (new Set(byK.map(x => x.strike)).size === 4 && a.optionType === 'PUT' && b.optionType === 'PUT' && c.optionType === 'CALL' && d.optionType === 'CALL' && a.side === 'SHORT' && b.side === 'LONG' && c.side === 'LONG' && d.side === 'SHORT' && [a.quantity,b.quantity,c.quantity].every(q => q === d.quantity)) return { name: 'LONG IRON CONDOR', chinese: '多头铁鹰式', bias: 'RANGE / VOLATILITY LONG', legs: 4 };
     }
   }
   return null;

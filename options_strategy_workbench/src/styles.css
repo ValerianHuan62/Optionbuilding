@@ -182,3 +182,9 @@
   .assumption-note>.section-title,.assumption-note>.greek-unit-profile,.assumption-note>.assumption-copy{grid-column:auto}
   .scenario-greeks{grid-template-columns:repeat(3,minmax(0,1fr))}
 }
+
+/* Let the document scroll: show every chain strike and saved strategy. */
+.chain-panel{max-height:none;min-height:0;overflow:visible}
+.chain-scroll{flex:none;min-height:0;max-height:none;overflow-x:auto;overflow-y:visible}
+.active-strategy{max-height:none;overflow:visible}
+.strategy-library .saved-list{max-height:none;overflow:visible}

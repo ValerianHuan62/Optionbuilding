@@ -68,13 +68,13 @@ describe('rule-based strategy classification', () => {
   });
   it('recognizes both iron condor directions, butterflies, ratio and calendar structures', () => {
     const condor=[leg({optionType:'PUT',strike:80}),leg({id:'p2',optionType:'PUT',side:'SHORT',strike:90}),leg({id:'c1',side:'SHORT',strike:110}),leg({id:'c2',side:'LONG',strike:120})];
-    expect(classifyStrategy(condor)?.name).toBe('LONG IRON CONDOR');
-    expect(classifyStrategy(condor.map(x=>({...x,side:x.side==='LONG'?'SHORT' as const:'LONG' as const})))?.name).toBe('SHORT IRON CONDOR');
+    expect(classifyStrategy(condor)?.name).toBe('SHORT IRON CONDOR');
+    expect(classifyStrategy(condor.map(x=>({...x,side:x.side==='LONG'?'SHORT' as const:'LONG' as const})))?.name).toBe('LONG IRON CONDOR');
     expect(classifyStrategy([leg({strike:90}),leg({id:'b',side:'SHORT',strike:100,quantity:2}),leg({id:'c',strike:110})])?.name).toBe('LONG CALL BUTTERFLY');
     expect(classifyStrategy([leg({optionType:'PUT',strike:90}),leg({id:'b',optionType:'PUT',side:'SHORT',strike:100,quantity:2}),leg({id:'c',optionType:'PUT',strike:110})])?.name).toBe('LONG PUT BUTTERFLY');
     const ironFly=[leg({optionType:'PUT',strike:90}),leg({id:'p-atm',optionType:'PUT',side:'SHORT',strike:100}),leg({id:'c-atm',side:'SHORT',strike:100}),leg({id:'c-wing',side:'LONG',strike:110})];
-    expect(classifyStrategy(ironFly)?.name).toBe('LONG IRON BUTTERFLY');
-    expect(classifyStrategy(ironFly.map(x=>({...x,side:x.side==='LONG'?'SHORT' as const:'LONG' as const})))?.name).toBe('SHORT IRON BUTTERFLY');
+    expect(classifyStrategy(ironFly)?.name).toBe('SHORT IRON BUTTERFLY');
+    expect(classifyStrategy(ironFly.map(x=>({...x,side:x.side==='LONG'?'SHORT' as const:'LONG' as const})))?.name).toBe('LONG IRON BUTTERFLY');
     expect(classifyStrategy([leg({strike:90,quantity:2}),leg({id:'r',side:'SHORT',strike:100,quantity:1})])?.name).toBe('CALL RATIO SPREAD');
     expect(classifyStrategy([leg({expiry:'2026-11-27'}),leg({id:'cal',side:'SHORT',expiry:'2026-12-24'})])?.name).toBe('CALENDAR SPREAD');
     expect(classifyStrategy([leg({expiry:'2026-11-27',strike:100}),leg({id:'diag',side:'SHORT',strike:110,expiry:'2026-12-24'})])?.name).toBe('DIAGONAL SPREAD');

@@ -106,8 +106,10 @@ function parseTTable(table: string[][], context: ChainImportContext): ChainImpor
   const midPriceColumn = (side: 'CALL' | 'PUT') => column(side, header => /中间价|中间价格/.test(header));
   const callMid = midPriceColumn('CALL'), putMid = midPriceColumn('PUT');
   const callPriceColumn = callMid, putPriceColumn = putMid;
-  const callIvColumn = column('CALL', header => /隐含波动率|波动率|^\s*iv\s*$/i.test(header));
-  const putIvColumn = column('PUT', header => /隐含波动率|波动率|^\s*iv\s*$/i.test(header));
+  // The T-table also contains historical volatility, which is not option IV.
+  const impliedVolatilityHeader = (header: string) => /隐含波动率|^\s*iv\s*$/i.test(header);
+  const callIvColumn = column('CALL', impliedVolatilityHeader);
+  const putIvColumn = column('PUT', impliedVolatilityHeader);
   if (callPriceColumn < 0 || putPriceColumn < 0) {
     return { rows: [], errors: ['T 字表必须同时包含 Call 与 Put 的“中间价”列；“最新价”不会作为期权价格导入。'] };
   }
