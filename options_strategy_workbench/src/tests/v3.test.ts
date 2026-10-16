@@ -8,10 +8,10 @@ import { calculateScenarioGrid, commonPriceGrid, hasCommonExpiry } from '../engi
 import { legsFromChain, migrateWorkbenchState } from '../utils/optionChain';
 
 const params={m:.12,minimumRatio:.5};
-const defaults:WorkbenchState={underlying:'MO · 中证1000',spot:6970,forward:6970,expiry:'2026-12-24',daysToExpiry:10,multiplier:100,model:'BSM',riskFreeRate:1.65,dividendYield:0,greeksMode:'MANUAL',greekInputFormat:'LEGACY_POINTS',marginParams:params,costs:{openPerContract:0,closePerContract:0,settlementPerContract:0},optionChain:[],activeStrategy:[]};
+const defaults:WorkbenchState={underlying:'MO · 中证1000',spot:6970,expiry:'2026-12-24',daysToExpiry:10,multiplier:100,riskFreeRate:1.65,dividendYield:0,greekInputFormat:'LEGACY_POINTS',marginParams:params,costs:{openPerContract:0,closePerContract:0,settlementPerContract:0},optionChain:[],activeStrategy:[]};
 const contract=(o:Partial<OptionContract>={}):OptionContract=>({contractId:'MO-C-7000',underlying:'MO · 中证1000',optionType:'CALL',strike:7000,expiry:'2026-12-24',multiplier:100,premium:70.2,settlementPrice:null,impliedVolatility:.25,greeks:{},...o});
 const leg=(o:Partial<OptionLeg>={}):OptionLeg=>({id:'leg-1',optionType:'CALL',side:'LONG',strike:100,premium:10,quantity:1,multiplier:100,expiry:'2026-12-24',iv:.25,greeks:{},...o});
-const scenario=(input:Partial<Parameters<typeof scenarioPnl>[1]>={})=>({spot:100,forward:100,valuationDate:'2026-10-14',daysToExpiryByLeg:{'leg-1':10},daysForward:0,ivShift:0,rate:0,dividend:0,model:'BSM' as const,openFees:0,closePerContract:0,settlementPerContract:0,...input});
+const scenario=(input:Partial<Parameters<typeof scenarioPnl>[1]>={})=>({spot:100,valuationDate:'2026-10-14',daysToExpiryByLeg:{'leg-1':10},daysForward:0,ivShift:0,rate:0,dividend:0,openFees:0,closePerContract:0,settlementPerContract:0,...input});
 
 describe('V3 entry price, library migration, and chain isolation',()=>{
   it('keeps saved contract identity and entry premiums separate from editable market premiums',()=>{
@@ -30,12 +30,19 @@ describe('V3 entry price, library migration, and chain isolation',()=>{
   });
   it('round-trips two separately saved strategies without mutating the shared chain',()=>{
     const c=contract({premium:76.2});
-    const saved=[{id:'a',name:'Bull Call',underlying:c.underlying,createdAt:'2026-10-14T00:00:00Z',updatedAt:'2026-10-14T00:00:00Z',legs:[{contractId:c.contractId,side:'LONG' as const,quantity:1,entryPremium:76.2}],pricingSettings:{spot:6970,forward:6970,expiry:c.expiry,model:'BSM' as const,riskFreeRate:1.65,dividendYield:0,multiplier:100,greeksMode:'MANUAL' as const},transactionCosts:defaults.costs,notes:''},
-      {id:'b',name:'Short Call',underlying:c.underlying,createdAt:'2026-10-14T00:00:01Z',updatedAt:'2026-10-14T00:00:01Z',legs:[{contractId:c.contractId,side:'SHORT' as const,quantity:2,entryPremium:80}],pricingSettings:{spot:6970,forward:6970,expiry:c.expiry,model:'BSM' as const,riskFreeRate:1.65,dividendYield:0,multiplier:100,greeksMode:'MANUAL' as const},transactionCosts:defaults.costs,notes:''}];
-    const restored=migrateWorkbenchState(JSON.parse(JSON.stringify({...defaults,optionChain:[c],savedStrategies:saved})),defaults);
+    const saved=[{id:'a',name:'Bull Call',underlying:c.underlying,createdAt:'2026-10-14T00:00:00Z',updatedAt:'2026-10-14T00:00:00Z',legs:[{contractId:c.contractId,side:'LONG' as const,quantity:1,entryPremium:76.2}],pricingSettings:{spot:6970,forward:6970,expiry:c.expiry,riskFreeRate:1.65,dividendYield:0,multiplier:100,greeksMode:'MANUAL' as const},transactionCosts:defaults.costs,notes:''},
+      {id:'b',name:'Short Call',underlying:c.underlying,createdAt:'2026-10-14T00:00:01Z',updatedAt:'2026-10-14T00:00:01Z',legs:[{contractId:c.contractId,side:'SHORT' as const,quantity:2,entryPremium:80}],pricingSettings:{spot:4300,forward:6970,model:'BLACK76',expiry:c.expiry,riskFreeRate:1.65,dividendYield:0,multiplier:100,greeksMode:'MANUAL' as const},transactionCosts:defaults.costs,notes:''}];
+    const restored=migrateWorkbenchState(JSON.parse(JSON.stringify({...defaults,forward:6905,model:'BLACK76',greeksMode:'MANUAL',optionChain:[c],savedStrategies:saved})),defaults);
     expect(restored.savedStrategies?.map(x=>x.name)).toEqual(['Bull Call','Short Call']);
     expect(restored.optionChain[0].premium).toBe(76.2);
     expect(restored.savedStrategies?.[1].legs[0].entryPremium).toBe(80);
+    expect(restored).not.toHaveProperty('model');
+    expect(restored).not.toHaveProperty('forward');
+    expect(restored.spot).toBe(6905);
+    expect(restored.migrationNote).toContain('原现货 6970');
+    expect(restored.savedStrategies?.[1].pricingSettings.spot).toBe(6970);
+    expect(restored.savedStrategies?.[1].pricingSettings).not.toHaveProperty('model');
+    expect(restored.savedStrategies?.[1].migrationNote).toContain('原现货 4300');
   });
 });
 
@@ -92,29 +99,22 @@ describe('revalued scenario PnL',()=>{
     const short=leg({id:'short-7000',side:'SHORT',strike:7000,premium:39.4,iv:.3804,expiry:'2026-10-16'});
     const long=leg({id:'long-7200',strike:7200,premium:6.4,iv:.3885,expiry:'2026-10-16'});
     const spot=6905.17*.95;
-    const input={spot,forward:spot,valuationDate:'2026-10-14',daysToExpiryByLeg:undefined,daysForward:1,ivShift:.08,rate:1.65,dividend:1.1,model:'BSM' as const};
-    const shortMark=priceOption({...short,iv:.4604},{spot,forward:spot,rate:1.65,dividend:1.1,days:1,model:'BSM'}).value;
-    const longMark=priceOption({...long,iv:.4685},{spot,forward:spot,rate:1.65,dividend:1.1,days:1,model:'BSM'}).value;
+    const input={spot,valuationDate:'2026-10-14',daysToExpiryByLeg:undefined,daysForward:1,ivShift:.08,rate:1.65,dividend:1.1};
+    const shortMark=priceOption({...short,iv:.4604},{spot,rate:1.65,dividend:1.1,days:1}).value;
+    const longMark=priceOption({...long,iv:.4685},{spot,rate:1.65,dividend:1.1,days:1}).value;
     const pnl=scenarioPnl([short,long],input);
     const todayPnl=scenarioPnl([short,long],{...input,daysForward:0});
-    const shortToday=priceOption({...short,iv:.4604},{spot,forward:spot,rate:1.65,dividend:1.1,days:2,model:'BSM'}).value;
-    const longToday=priceOption({...long,iv:.4685},{spot,forward:spot,rate:1.65,dividend:1.1,days:2,model:'BSM'}).value;
+    const shortToday=priceOption({...short,iv:.4604},{spot,rate:1.65,dividend:1.1,days:2}).value;
+    const longToday=priceOption({...long,iv:.4685},{spot,rate:1.65,dividend:1.1,days:2}).value;
     expect(todayPnl).toBeCloseTo((33-shortToday+longToday)*100,6);
     expect(pnl).toBeCloseTo((33-shortMark+longMark)*100,6);
     expect(pnl).toBeGreaterThan(3200);
     expect(pnl).toBeLessThan(3300);
     expect(scenarioPnl([short,long],{...input,daysForward:2})).toBe(3300);
   });
-  it('keeps BSM dividend carry and Black-76 forward carry consistent at the same horizon',()=>{
-    const l=leg({strike:100,iv:.3,expiry:'2026-10-16'});
-    const input=scenario({spot:102,forward:102*Math.exp((.02-.01)/365),valuationDate:'2026-10-14',daysToExpiryByLeg:undefined,daysForward:1,rate:2,dividend:1});
-    expect(scenarioPnl([l],input)).toBeCloseTo(scenarioPnl([l],{...input,model:'BLACK76'})!,8);
-  });
-  it('uses the forward coordinate for Black-76 when the scenario reaches expiry',()=>{
+  it('settles the BSM scenario at the shocked spot when time reaches expiry',()=>{
     const l=leg({optionType:'CALL',strike:100,premium:5,expiry:'2026-10-16'});
-    const input=scenario({spot:90,forward:110,valuationDate:'2026-10-14',daysToExpiryByLeg:undefined,daysForward:2,model:'BLACK76'});
-    expect(scenarioPnl([l],input)).toBe(500);
-    expect(scenarioPnl([l],{...input,model:'BSM'})).toBe(-500);
+    expect(scenarioPnl([l],scenario({spot:90,valuationDate:'2026-10-14',daysToExpiryByLeg:undefined,daysForward:2}))).toBe(-500);
   });
   it('rejects an inconsistent strike-IV surface instead of exceeding spread maximum profit',()=>{
     const short=leg({id:'short',side:'SHORT',strike:100,premium:10,iv:.05,expiry:'2026-10-16'});
@@ -124,22 +124,22 @@ describe('revalued scenario PnL',()=>{
   it('maps IV 25% + 3pp to 28%',()=>{
     const l=leg();
     const actual=scenarioPnl([l],scenario({ivShift:.03}))!;
-    const expected=(priceOption(l,{spot:100,forward:100,rate:0,dividend:0,days:10,model:'BSM'}).value-l.premium)*100;
-    const iv28=(priceOption({...l,iv:.28},{spot:100,forward:100,rate:0,dividend:0,days:10,model:'BSM'}).value-l.premium)*100;
+    const expected=(priceOption(l,{spot:100,rate:0,dividend:0,days:10}).value-l.premium)*100;
+    const iv28=(priceOption({...l,iv:.28},{spot:100,rate:0,dividend:0,days:10}).value-l.premium)*100;
     expect(actual).toBeCloseTo(iv28,8);
     expect(actual).not.toBeCloseTo(expected,4);
   });
   it('advances each leg from 10 calendar days to 7 and recomputes theoretical PnL at zero scenario shift',()=>{
     const l=leg({premium:8});
     const actual=scenarioPnl([l],scenario({daysForward:3}))!;
-    const expected=(priceOption(l,{spot:100,forward:100,rate:0,dividend:0,days:7,model:'BSM'}).value-8)*100;
+    const expected=(priceOption(l,{spot:100,rate:0,dividend:0,days:7}).value-8)*100;
     expect(actual).toBeCloseTo(expected,8);
     expect(actual).not.toBe(0);
   });
   it('returns the model mark minus entry premium at the current valuation point',()=>{
     const l=leg({premium:8});
     const actual=scenarioPnl([l],scenario())!;
-    const theoretical=priceOption(l,{spot:100,forward:100,rate:0,dividend:0,days:10,model:'BSM'}).value;
+    const theoretical=priceOption(l,{spot:100,rate:0,dividend:0,days:10}).value;
     expect(actual).toBeCloseTo((theoretical-8)*100,8);
   });
   it('uses one common price coordinate grid and the same price-IV matrix for 2D and 3D slices',()=>{

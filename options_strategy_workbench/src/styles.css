@@ -95,6 +95,7 @@
 .instrument-cell{padding:11px 14px}
 .instrument-cell label,.eyebrow,.micro-caption{font-size:10px}
 .instrument-cell input,.instrument-cell select,.instrument-cell input[type=date]{font-size:14px}
+.instrument-cell.model-select>b{font:500 14px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .panel-heading h2,.panel-heading h3{font-size:14px}
 .count-stamp,.chart-mode{font-size:10px}
 .section-title{font-size:10px}

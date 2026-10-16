@@ -31,8 +31,8 @@ describe('MO2610 report scenarios against independent Python BSM', () => {
   for (const item of cases) {
     it(`matches both strategies in scenario ${item.name}`, () => {
       const spot = 6905.17 * (1 + item.pricePct / 100);
-      const input = { spot, forward: spot, valuationDate: '2026-10-14', daysForward: 1,
-        ivShift: item.ivPp / 100, rate: 1.65, dividend: 1.1, model: 'BSM' as const };
+      const input = { spot, valuationDate: '2026-10-14', daysForward: 1,
+        ivShift: item.ivPp / 100, rate: 1.65, dividend: 1.1 };
       const bear = scenarioPnl(bearCall, input);
       const iron = scenarioPnl(ironCondor, input);
       expect(bear).not.toBeNull();
@@ -41,4 +41,17 @@ describe('MO2610 report scenarios against independent Python BSM', () => {
       expect(Math.abs(iron! - item.iron)).toBeLessThan(0.1);
     });
   }
+  it('matches Python for the saved C6900/C7100 bear call, which differs from the report spread', () => {
+    const savedBearCall = [
+      leg('saved-C6900', 'SHORT', 'CALL', 6900, 80.8, .3826),
+      leg('saved-C7100', 'LONG', 'CALL', 7100, 16.2, .3758),
+    ];
+    const actual = scenarioPnl(savedBearCall, {
+      spot: 6905.17 * .95, valuationDate: '2026-10-14', daysForward: 1,
+      ivShift: .08, rate: 1.66, dividend: 1.1,
+    });
+    expect(actual).not.toBeNull();
+    expect(Math.abs(actual! - 6352.69)).toBeLessThan(.1);
+    expect(actual).not.toBeCloseTo(3282.63, 1);
+  });
 });

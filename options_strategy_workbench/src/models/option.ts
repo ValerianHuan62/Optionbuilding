@@ -1,6 +1,5 @@
 export type OptionType = 'CALL' | 'PUT';
 export type Side = 'LONG' | 'SHORT';
-export type PricingModel = 'BSM' | 'BLACK76';
 export type GreekInput = { delta?: number; gamma?: number; theta?: number; vega?: number; rho?: number; source?: GreekInputFormat; snapshotAt?: string };
 export type GreekInputFormat = 'LEGACY_POINTS' | 'STANDARDIZED' | 'TONGHUASHUN_RAW' | 'KUAIQI_RAW';
 export type GreekRawProfile = { thetaUnit: 'DAY' | 'YEAR'; vegaUnit: 'IV_POINT' | 'IV_DECIMAL'; rhoUnit: 'RATE_POINT' | 'RATE_DECIMAL'; includesMultiplier: boolean };
@@ -25,15 +24,12 @@ export type WorkbenchState = {
   underlying: string;
   valuationDate?: string;
   spot: number;
-  forward: number;
   expiry: string;
   multiplier: number;
   daysToExpiry: number;
-  model: PricingModel;
   riskFreeRate: number;
   dividendYield: number;
   costs: Costs;
-  greeksMode: 'MANUAL' | 'MODEL';
   /** Legacy field retained only for importing older saved files. */
   legs?: OptionLeg[];
   optionChain: OptionContract[];
@@ -44,6 +40,7 @@ export type WorkbenchState = {
   greekUnitsVersion?: 1;
   savedStrategies?: SavedStrategy[];
   activeSavedStrategyId?: string | null;
+  migrationNote?: string;
 };
-export type SavedStrategy = { id: string; name: string; underlying: string; createdAt: string; updatedAt: string; legs: SavedStrategyLeg[]; pricingSettings: Pick<WorkbenchState, 'valuationDate' | 'spot' | 'forward' | 'expiry' | 'model' | 'riskFreeRate' | 'dividendYield' | 'multiplier' | 'greeksMode' | 'greekInputFormat' | 'greekRawProfile' | 'marginParams'>; transactionCosts: Costs; notes: string };
+export type SavedStrategy = { id: string; name: string; underlying: string; createdAt: string; updatedAt: string; legs: SavedStrategyLeg[]; pricingSettings: Pick<WorkbenchState, 'valuationDate' | 'spot' | 'expiry' | 'riskFreeRate' | 'dividendYield' | 'multiplier' | 'marginParams'>; transactionCosts: Costs; notes: string; migrationNote?: string };
 export type SavedStrategyLeg = { contractId: string; side: Side; quantity: number; entryPremium: number; settlementPrice?: number | null };

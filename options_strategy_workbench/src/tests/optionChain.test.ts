@@ -4,8 +4,8 @@ import { legsFromChain, migrateWorkbenchState, parseOptionChainText } from '../u
 import { analyzePayoff } from '../engine/payoffAnalyzer';
 import { classifyStrategy } from '../engine/strategyClassifier';
 
-const defaults: WorkbenchState = { underlying:'IO · 沪深300', spot:4300, forward:4300, expiry:'2026-12-24', daysToExpiry:73, multiplier:100,
-  model:'BSM', riskFreeRate:1.65, dividendYield:1.8, greeksMode:'MANUAL', costs:{openPerContract:0,closePerContract:0,settlementPerContract:0}, optionChain:[], activeStrategy:[] };
+const defaults: WorkbenchState = { underlying:'IO · 沪深300', spot:4300, expiry:'2026-12-24', daysToExpiry:73, multiplier:100,
+  riskFreeRate:1.65, dividendYield:1.8, costs:{openPerContract:0,closePerContract:0,settlementPerContract:0}, optionChain:[], activeStrategy:[] };
 const sample = `strike,callPremium,putPremium,callIV,putIV,callDelta,putDelta,callGamma,putGamma,callVega,putVega,callTheta,putTheta\n4100,224,24,18,20,0.816,-0.184,0.00113,0.00120,3.28,3.10,-1.04,-1.01\n4200,142,42,19,21,0.694,-0.306,0.00167,0.00172,4.32,4.19,-1.23,-1.20\n4300,76.2,76.2,20,22,0.509,-0.491,0.00209,0.00220,4.92,4.80,-1.27,-1.25\n4400,32.8,132.8,21,23,0.297,-0.703,0.00194,0.00188,4.27,4.01,-1.03,-0.98\n4500,11.4,211.4,22,24,0.133,-0.867,0.00124,0.00110,2.65,2.30,-0.62,-0.55`;
 
 describe('option chain ingestion and migration', () => {

@@ -23,6 +23,14 @@ function toKuaiqiGreeks(raw: GreekInput, multiplier: number, format: GreekInputF
 
 export function migrateWorkbenchState(raw: Partial<WorkbenchState> & { legs?: OptionLeg[] }, defaults: WorkbenchState): WorkbenchState {
   const next = { ...defaults, ...raw, costs: { ...defaults.costs, ...raw.costs } };
+  // Older browser snapshots carried alternate pricing and manual-Greek settings.
+  // Drop them on load so every saved strategy uses the same spot BSM path.
+  const legacyState = raw as Partial<WorkbenchState> & { forward?: number; model?: string };
+  if (legacyState.model === 'BLACK76' && !next.migrationNote) {
+    if (Number.isFinite(legacyState.forward) && legacyState.forward! > 0) next.spot = legacyState.forward!;
+    next.migrationNote = `旧模型当前组合：原现货 ${raw.spot ?? 'N/A'}，原远期 ${legacyState.forward ?? 'N/A'}；BSM 暂以原远期作为现货，请核对。`;
+  }
+  for (const key of ['forward', 'model', 'greeksMode']) delete (next as Record<string, unknown>)[key];
   const oldGreekFormat = raw.greekInputFormat ?? 'LEGACY_POINTS';
   const oldGreekProfile = raw.greekRawProfile ?? { thetaUnit: 'YEAR' as const, vegaUnit: 'IV_DECIMAL' as const, rhoUnit: 'RATE_DECIMAL' as const, includesMultiplier: false };
   const repairUnversionedQuick = raw.greekInputFormat === 'KUAIQI_RAW' && raw.greekUnitsVersion !== 1;
@@ -35,7 +43,19 @@ export function migrateWorkbenchState(raw: Partial<WorkbenchState> & { legs?: Op
       theta: greeks.theta === undefined ? undefined : greeks.theta * 100,
     } };
   };
-  const savedStrategies = (raw.savedStrategies ?? []).map(record => ({ ...record, pricingSettings: { ...record.pricingSettings, greekInputFormat: 'KUAIQI_RAW' as const, greekRawProfile: defaults.greekRawProfile } }));
+  const savedStrategies = (raw.savedStrategies ?? []).map(record => {
+    const pricingSettings = { ...record.pricingSettings };
+    const legacyModel = (pricingSettings as { model?: string }).model;
+    const legacyForward = (pricingSettings as { forward?: number }).forward;
+    const legacySpot = pricingSettings.spot;
+    let migrationNote = record.migrationNote;
+    if (legacyModel === 'BLACK76' && !migrationNote) {
+      if (Number.isFinite(legacyForward) && legacyForward! > 0) pricingSettings.spot = legacyForward!;
+      migrationNote = `旧模型快照：原现货 ${legacySpot}，原远期 ${legacyForward ?? 'N/A'}；BSM 暂以原远期作为现货，请核对。`;
+    }
+    for (const key of ['forward', 'model', 'greeksMode', 'greekInputFormat', 'greekRawProfile']) delete (pricingSettings as Record<string, unknown>)[key];
+    return { ...record, pricingSettings, ...(migrationNote ? { migrationNote } : {}) };
+  });
   if (!Array.isArray(raw.legs) && Array.isArray(raw.optionChain) && Array.isArray(raw.activeStrategy)) {
     const chain = raw.optionChain.map(c => ({ ...normalizeContractGreeks(c), marketPremium: c.marketPremium ?? c.premium, settlementPrice: c.settlementPrice ?? null }));
     return { ...next, optionChain: chain, activeStrategy: raw.activeStrategy.map(p => ({ ...p, entryPremium: p.entryPremium ?? chain.find(c => c.contractId === p.contractId)?.premium ?? undefined })), legs: undefined,

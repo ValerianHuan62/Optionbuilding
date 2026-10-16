@@ -92,35 +92,36 @@ describe('rule-based strategy classification', () => {
 });
 
 describe('model pricing, Greeks and scenarios', () => {
-  const base={spot:100,forward:100,rate:0,dividend:0,days:365,model:'BSM' as const};
-  it('prices BSM call and Black-76 call, with stable ATM Greeks', () => {
+  const base={spot:100,rate:0,dividend:0,days:365};
+  it('prices a BSM call with stable ATM Greeks', () => {
     const q=priceOption(leg({strike:100,iv:.2}),base);
     expect(q.value).toBeCloseTo(7.9656,2); expect(q.greeks?.delta).toBeCloseTo(.5398,2); expect(q.greeks?.gamma).toBeGreaterThan(0);
-    const b76=priceOption(leg({strike:100,iv:.2}),{...base,rate:3,model:'BLACK76'});
-    expect(b76.value).toBeGreaterThan(0); expect(b76.greeks?.vega).toBeGreaterThan(0);
+    expect(q.greeks?.vega).toBeGreaterThan(0);
   });
-  it('handles expiry, invalid IV, and raw point Greek units', () => {
+  it('handles expiry, invalid IV, and position Greek units', () => {
     expect(priceOption(leg(),{...base,days:0}).value).toBe(0);
     expect(Number.isNaN(priceOption(leg({iv:0}),base).value)).toBe(true);
-    const values=legGreeks(leg({greeks:{delta:.5,gamma:.01,theta:-.02,vega:4,rho:6}}),base,'MANUAL','KUAIQI_RAW');
-    expect(values.delta).toBe(.5); expect(values.vega).toBe(4); expect(values.rho).toBe(6);
+    const q=priceOption(leg(),base);
+    const values=legGreeks(leg({side:'SHORT',quantity:2}),base);
+    expect(values.delta).toBeCloseTo(-2*q.greeks!.delta!,8);
+    expect(values.vega).toBeCloseTo(-2*q.greeks!.vega!/100,8);
     expect(aggregateGreeks([values,{...values,delta:null}]).delta).toBeNull();
     expect(aggregateGreeks([]).vega).toBeNull();
   });
   it('marks scenarios from actual entry premium and rejects invalid IV shifts', () => {
-    const scenario={spot:100,forward:100,valuationDate:'2026-10-12',daysForward:0,ivShift:0,rate:0,dividend:0,model:'BSM' as const,openFees:0,closePerContract:0,settlementPerContract:0};
+    const scenario={spot:100,valuationDate:'2026-10-12',daysForward:0,ivShift:0,rate:0,dividend:0,openFees:0,closePerContract:0,settlementPerContract:0};
     const l=leg({strike:100,premium:7.9656,expiry:'2027-10-12',iv:.2});
     expect(scenarioPnl([l],scenario)).toBeCloseTo(0,1);
     expect(scenarioPnl([l],{...scenario,ivShift:-.2})).toBeNull();
   });
   it('settles legs that expire before the shared scenario date', () => {
     const l=leg({strike:100,premium:5,expiry:'2026-12-24'});
-    const pnl=scenarioPnl([l],{spot:120,forward:120,valuationDate:'2026-10-12',daysForward:80,ivShift:0,rate:0,dividend:0,model:'BSM',openFees:0,closePerContract:0,settlementPerContract:0});
+    const pnl=scenarioPnl([l],{spot:120,valuationDate:'2026-10-12',daysForward:80,ivShift:0,rate:0,dividend:0,openFees:0,closePerContract:0,settlementPerContract:0});
     expect(pnl).toBe(1500);
   });
   it('uses per-leg days-to-expiry overrides from the workbench', () => {
     const l=leg({strike:100,premium:5,expiry:'2027-12-24'});
-    const pnl=scenarioPnl([l],{spot:120,forward:120,valuationDate:'2026-10-12',daysToExpiryByLeg:{[l.id]:1},daysForward:2,ivShift:0,rate:0,dividend:0,model:'BSM',openFees:0,closePerContract:0,settlementPerContract:0});
+    const pnl=scenarioPnl([l],{spot:120,valuationDate:'2026-10-12',daysToExpiryByLeg:{[l.id]:1},daysForward:2,ivShift:0,rate:0,dividend:0,openFees:0,closePerContract:0,settlementPerContract:0});
     expect(pnl).toBe(1500);
   });
 });
