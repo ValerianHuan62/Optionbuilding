@@ -18,6 +18,17 @@ describe('option chain ingestion and migration', () => {
     expect(preview.rows.find(c => c.optionType === 'PUT')?.impliedVolatility).toBeCloseTo(.3856);
   });
 
+  it('retains independent quote and IV source times from both sides of a T-table', () => {
+    const table=`报价时间,IV时间,隐含波动率,中间价,MO2610 行权价 MO2610,中间价,隐含波动率,报价时间,IV时间
+2026-10-14T15:00:00+08:00,2026-10-14T14:59:00+08:00,38%,39.4,C 7000 P,136.4,39%,2026-10-14T15:01:00+08:00,2026-10-14T15:00:00+08:00`;
+    const preview=parseOptionChainText(table,{underlying:'MO · 中证1000',expiry:'2026-10-16',multiplier:100});
+    expect(preview.errors).toEqual([]);
+    expect(preview.rows[0].quoteAt).toBe('2026-10-14T15:00:00+08:00');
+    expect(preview.rows[0].ivAt).toBe('2026-10-14T14:59:00+08:00');
+    expect(preview.rows[1].quoteAt).toBe('2026-10-14T15:01:00+08:00');
+    expect(preview.rows[1].ivAt).toBe('2026-10-14T15:00:00+08:00');
+  });
+
   it('previews all five call/put strikes with fast-futures raw Greek units', () => {
     const preview = parseOptionChainText(sample,{underlying:defaults.underlying,expiry:defaults.expiry,multiplier:defaults.multiplier});
     expect(preview.errors).toEqual([]);

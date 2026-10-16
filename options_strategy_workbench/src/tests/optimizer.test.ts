@@ -3,7 +3,8 @@ import type { OptionContract, WorkbenchState } from '../models/option';
 import * as pricing from '../engine/pricing';
 import { grossExpirationPnl } from '../engine/payoff';
 import { scenarioPnl } from '../engine/scenario';
-import { defaultSettings, enumerateStructures, evaluateCandidate, greekRiskSummary, loadCandidate, migrateGreekLimits, prepareOptimization, rankCandidates, robustness, sampleProbabilities, shiftProbability, validateProbabilities, type OptimizerSettings } from '../engine/optimizer';
+import { assessQuoteQuality, defaultSettings, enumerateStructures, evaluateCandidate, expirationScenarioPnls, greekRiskSummary, loadCandidate, migrateGreekLimits, prepareOptimization, rankCandidates, robustness, sampleProbabilities, shiftProbability, validateProbabilities, type OptimizerSettings } from '../engine/optimizer';
+import { shortOptionMargin } from '../engine/margin';
 import { parseOptionChainText } from '../utils/optionChain';
 
 const makeState=():WorkbenchState=>{
@@ -26,6 +27,62 @@ const candidates=(state=makeState(),settings=getSettings(state))=>{
 };
 
 describe('Strike Optimizer',()=>{
+  it('reproduces SC6200/LC6300 expiry loss, BSM T+1 marks, margin basis, and quality rejection',()=>{
+    const spot=6905.17,expiry='2026-10-16',valuationDate='2026-10-14',underlying='MO · 中证1000';
+    const state={...makeState(),spot,expiry,valuationDate,underlying,dividendYield:1.1,riskFreeRate:1.66,costs:{openPerContract:0,closePerContract:0,settlementPerContract:0},optionChain:[
+      {contractId:'MO2610-C-6200',underlying,optionType:'CALL' as const,strike:6200,expiry,multiplier:100,premium:703.2,marketPremium:703.2,settlementPrice:703.2,impliedVolatility:.9202,greeks:{}},
+      {contractId:'MO2610-C-6300',underlying,optionType:'CALL' as const,strike:6300,expiry,multiplier:100,premium:603.8,marketPremium:603.8,settlementPrice:603.8,impliedVolatility:1.1257,greeks:{}},
+    ]};
+    const settings=defaultSettings(state);settings.entryMode='MID';settings.bearCallAtmFilter=false;
+    for(const item of Object.values(settings.limits))item.enabled=false;
+    const prepared=prepareOptimization(state,settings),positions=[...enumerateStructures(prepared)][0];
+    expect(positions.map(p=>p.contract.strike)).toEqual([6200,6300]);
+    const legs=positions.map(p=>({id:p.contract.contractId,optionType:p.contract.optionType,side:p.side,strike:p.contract.strike,premium:p.contract.premium!,quantity:1,multiplier:100,expiry,iv:p.contract.impliedVolatility!,greeks:{}}));
+    for(const pnl of expirationScenarioPnls(legs,settings.scenarios,spot))expect(pnl).toBeCloseTo(-60,8);
+    for(const [i,scenario] of settings.scenarios.entries()){
+      const shiftedSpot=spot*(1+scenario.movePct/100),days=2-scenario.days;
+      const direct=legs.reduce((sum,leg)=>sum+(leg.side==='LONG'?1:-1)*(pricing.priceOption({...leg,iv:leg.iv+scenario.ivPp/100},{spot:shiftedSpot,days,rate:1.66,dividend:1.1}).value-leg.premium)*100,0);
+      const cached=positions.reduce((sum,p)=>sum+(p.side==='LONG'?1:-1)*(prepared.marks.get(p.contract.contractId)![i].value-p.contract.premium!)*100,0);
+      expect(cached).toBeCloseTo(direct,8);
+    }
+    expect(shortOptionMargin({optionType:'CALL',spot,strike:6200,settlementPrice:703.2,multiplier:100,params:{m:.12,minimumRatio:.5}})).toBeCloseTo(153182.04,2);
+    expect(assessQuoteQuality(positions,state,settings,2).issues).toContain('MO2610-C-6200：行情价格低于 BSM 欧式下界');
+    expect(evaluateCandidate(prepared,positions)).toBeNull();
+    const defaultPositions=[...enumerateStructures(prepareOptimization(state,defaultSettings(state)))];
+    expect(defaultPositions).toHaveLength(0);
+  });
+  it('ranks by expected PnL by default, not a tiny max-loss denominator, and updates after probability changes',()=>{
+    const settings=getSettings(),base=candidates()[0],a={...base,id:'small-loss',scenarioPnls:[100,0,0,0,0,0],expiryScenarioPnls:[-1,-1,-1,-1,-1,-1],scenarioPnlGaps:[101,1,1,1,1,1],maxLoss:1},b={...base,id:'higher-pnl',scenarioPnls:[0,100,100,100,100,100],expiryScenarioPnls:[10,10,10,10,10,10],scenarioPnlGaps:[-10,90,90,90,90,90],maxLoss:100};
+    expect(rankCandidates([a,b],settings.scenarios)[0].id).toBe('higher-pnl');
+    expect(rankCandidates([a,b],settings.scenarios,'EXPECTED_LOSS')[0].id).toBe('small-loss');
+    const changed=shiftProbability(settings.scenarios,0,90)!;
+    const reranked=rankCandidates([a,b],changed);
+    expect(reranked[0].id).toBe('small-loss');
+    expect(reranked[0].expiryProfitableWeight).toBe(0);
+  });
+  it('checks market monotonicity, vertical bounds, IV validity and quote synchronization',()=>{
+    const state=makeState(),settings=getSettings(state),prep=prepareOptimization(state,settings),pair=[...enumerateStructures(prep)].find(p=>p[0].contract.strike===4300&&p[1].contract.strike===4400)!;
+    expect(assessQuoteQuality(pair,state,settings,16).status).toBe('WARNING');
+    const low=pair[0].contract,high=pair[1].contract,oldLow=low.marketPremium,oldHigh=high.marketPremium;
+    low.marketPremium=1;high.marketPremium=10;
+    expect(assessQuoteQuality(pair,state,settings,16).issues.some(x=>x.includes('未随执行价单调'))).toBe(true);
+    low.marketPremium=200;high.marketPremium=1;
+    expect(assessQuoteQuality(pair,state,settings,16).issues.some(x=>x.includes('无套利上界'))).toBe(true);
+    low.marketPremium=oldLow;high.marketPremium=oldHigh;high.impliedVolatility=null;
+    expect(assessQuoteQuality(pair,state,settings,16).issues.some(x=>x.includes('IV 无效'))).toBe(true);
+    high.impliedVolatility=.25;
+    low.quoteAt='2026-10-14T15:00:00+08:00';high.quoteAt='2026-10-14T15:10:00+08:00';
+    low.ivAt=low.quoteAt;high.ivAt=high.quoteAt;
+    expect(assessQuoteQuality(pair,state,settings,16).issues).toContain('逐腿行情时间相差超过 5 分钟');
+    high.quoteAt=low.quoteAt;high.ivAt='2026-10-14T14:50:00+08:00';
+    expect(assessQuoteQuality(pair,state,settings,16).issues.some(x=>x.includes('IV 与报价时间'))).toBe(true);
+  });
+  it('makes Greek direction filters optional',()=>{
+    const state=makeState(),settings=getSettings(state),candidate=candidates(state,settings).find(c=>c.baseGreeks.delta>=0||c.baseGreeks.vega>=0||c.baseGreeks.theta<=0);
+    expect(candidate).toBeDefined();
+    settings.greekPreferences.negativeDelta=true;settings.greekPreferences.negativeVega=true;settings.greekPreferences.positiveTheta=true;
+    expect(evaluateCandidate(prepareOptimization(state,settings),candidate!.positions)).toBeNull();
+  });
   it('uses the main workbench Greek units at entry and after a BSM scenario repricing',()=>{
     const state=makeState(),settings=getSettings(state),candidate=candidates(state,settings)[0];
     expect(candidate).toBeDefined();
@@ -89,6 +146,18 @@ describe('Strike Optimizer',()=>{
     const p=[...enumerateStructures(prep)].find(x=>x[0].contract.strike===4200&&x[1].contract.strike===4400)!;
     const marks=prep.marks.get(p[1].contract.contractId)!;marks[0]={...marks[0],value:marks[0].value+500};
     expect(evaluateCandidate(prep,p)).toBeNull();expect(prep.counts.reasons['跨执行价 BSM 曲面异常']).toBe(1);
+  });
+  it('excludes an actual pair of leg IVs when a shock makes its BSM call curve nonmonotone',()=>{
+    const state=makeState(),settings=getSettings(state);
+    for(const [strike,iv] of [[4200,.1],[4300,.2]]){
+      const c=state.optionChain.find(x=>x.optionType==='CALL'&&x.strike===strike)!;
+      const price=pricing.priceOption({optionType:'CALL',strike,iv},{spot:state.spot,days:16,rate:state.riskFreeRate,dividend:state.dividendYield}).value;
+      c.impliedVolatility=iv;c.premium=price;c.marketPremium=price;c.settlementPrice=price;c.bid=price-.01;c.ask=price+.01;
+    }
+    const prep=prepareOptimization(state,settings),pair=[...enumerateStructures(prep)].find(p=>p[0].contract.strike===4200&&p[1].contract.strike===4300)!;
+    expect(assessQuoteQuality(pair,state,settings,16).status).not.toBe('REJECT');
+    expect(evaluateCandidate(prep,pair)).toBeNull();
+    expect(prep.counts.reasons['跨执行价 BSM 曲面异常']).toBe(1);
   });
   it('rejects an executable credit wider than the spread width',()=>{
     const state=makeState(),c=state.optionChain.find(x=>x.optionType==='CALL'&&x.strike===4300)!;

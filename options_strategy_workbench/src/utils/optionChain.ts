@@ -134,6 +134,8 @@ function parseTTable(table: string[][], context: ChainImportContext): ChainImpor
   const lastColumn = (side: 'CALL' | 'PUT') => column(side, header => /最新价|^last$/i.test(header));
   const volumeColumn = (side: 'CALL' | 'PUT') => column(side, header => /成交量|^volume$/i.test(header));
   const oiColumn = (side: 'CALL' | 'PUT') => column(side, header => /持仓量|^oi$|^open.interest$/i.test(header));
+  const quoteTimeColumn = (side: 'CALL' | 'PUT') => column(side, header => /报价时间|行情时间|^quote.?at$|^quote.?time$/i.test(header));
+  const ivTimeColumn = (side: 'CALL' | 'PUT') => column(side, header => /隐波时间|IV时间|^iv.?at$|^iv.?time$/i.test(header));
   const callMid = midPriceColumn('CALL'), putMid = midPriceColumn('PUT');
   const callPriceColumn = callMid, putPriceColumn = putMid;
   // The T-table also contains historical volatility, which is not option IV.
@@ -180,6 +182,8 @@ function parseTTable(table: string[][], context: ChainImportContext): ChainImpor
       const price = numberAt(cells, side === 'CALL' ? callPriceColumn : putPriceColumn);
       const bid = numberAt(cells, bidColumn(side)), ask = numberAt(cells, askColumn(side));
       const last = numberAt(cells, lastColumn(side)), volume = numberAt(cells, volumeColumn(side)), openInterest = numberAt(cells, oiColumn(side));
+      const quoteIndex=quoteTimeColumn(side),ivTimeIndex=ivTimeColumn(side);
+      const quoteAt=quoteIndex>=0?cells[quoteIndex]?.trim()||null:null,ivAt=ivTimeIndex>=0?cells[ivTimeIndex]?.trim()||null:null;
       const ivIndex = side === 'CALL' ? callIvColumn : putIvColumn;
       const rawIv = numberAt(cells, ivIndex, true);
       if (price !== null && (!Number.isFinite(price) || price < 0)) { errors.push(`第 ${line} 行 ${side}：中间价不是有效的非负数。`); return; }
@@ -196,7 +200,7 @@ function parseTTable(table: string[][], context: ChainImportContext): ChainImpor
       const hasGreekValues = Object.values(greeks).some(value => value !== undefined);
       const contractId = contractIdFor(underlying, rowExpiry, type, strike);
       contracts.push({ contractId, underlying, optionType: type, strike, expiry: rowExpiry, multiplier: context.multiplier,
-        premium: price, marketPremium: price, settlementPrice: null, bid, ask, last, volume, openInterest, impliedVolatility: iv,
+        premium: price, marketPremium: price, settlementPrice: null, bid, ask, last, volume, openInterest, quoteAt, ivAt, impliedVolatility: iv,
         greeks: hasGreekValues ? { ...greeks, source: 'KUAIQI_RAW', snapshotAt } : greeks });
     });
   });
@@ -250,9 +254,13 @@ export function parseOptionChainText(text: string, context: ChainImportContext):
       const hasGreekValues=Object.values(greeks).some(value=>value!==undefined);
       const rowExpiry = headers.includes('expiry') ? cells[headers.indexOf('expiry')]?.trim() || context.expiry : context.expiry;
       const underlying = headers.includes('underlying') ? cells[headers.indexOf('underlying')]?.trim() || context.underlying : context.underlying;
+      const quoteColumn=[`${side}quoteat`,`${side}quotetime`,'quoteat','quotetime','snapshotat','tradedate'].find(name=>headers.includes(name));
+      const quoteAt=quoteColumn?cells[headers.indexOf(quoteColumn)]?.trim()||null:null;
+      const ivColumn=[`${side}ivat`,`${side}ivtime`,'ivat','ivtime'].find(name=>headers.includes(name));
+      const ivAt=ivColumn?cells[headers.indexOf(ivColumn)]?.trim()||null:null;
       contracts.push({ contractId: sourceContractId || contractIdFor(underlying, rowExpiry, type, strike), underlying,
         optionType: type, strike, expiry: rowExpiry, multiplier: context.multiplier, premium:premium ?? (bid!==null&&ask!==null?(bid+ask)/2:null), marketPremium:premium ?? (bid!==null&&ask!==null?(bid+ask)/2:null), settlementPrice,
-        bid,ask,last,volume,openInterest,quoteStatus: headers.includes(`${side}quotestatus`) ? cells[headers.indexOf(`${side}quotestatus`)]?.trim() : null,
+        bid,ask,last,volume,openInterest,quoteAt,ivAt,quoteStatus: headers.includes(`${side}quotestatus`) ? cells[headers.indexOf(`${side}quotestatus`)]?.trim() : null,
         impliedVolatility: iv, greeks: hasGreekValues ? { ...greeks, source: context.greekInputFormat ?? 'KUAIQI_RAW', snapshotAt } : greeks });
     });
   });
