@@ -113,14 +113,19 @@ describe('Strike Optimizer',()=>{
     settings.limits.maxDelta={enabled:true,value:Math.abs(candidate.baseGreeks.delta)/2};
     expect(evaluateCandidate(prepareOptimization(state,settings),positions)).toBeNull();
   });
-  it('orders Bear Call short lower / long higher and uses real contract codes',()=>{
-    const state=makeState(),settings=getSettings(state),prepared=prepareOptimization(state,settings);
-    const structures=[...enumerateStructures(prepared)];expect(structures.length).toBeGreaterThan(0);
-    for(const p of structures){expect(p[0].side).toBe('SHORT');expect(p[1].side).toBe('LONG');expect(p[0].contract.strike).toBeLessThan(p[1].contract.strike);expect(state.optionChain).toContain(p[0].contract);}
-  });
-  it('orders Bear Put long lower / short higher',()=>{
-    const state=makeState(),settings={...getSettings(state),strategy:'BEAR_PUT' as const};
-    for(const p of enumerateStructures(prepareOptimization(state,settings))){expect(p.map(x=>x.side)).toEqual(['LONG','SHORT']);expect(p[0].contract.strike).toBeLessThan(p[1].contract.strike);}
+  it('orders all vertical spreads by the correct directional payoff',()=>{
+    const state=makeState();
+    const orientations={BULL_CALL:['LONG','SHORT'],BEAR_CALL:['SHORT','LONG'],BULL_PUT:['LONG','SHORT'],BEAR_PUT:['SHORT','LONG']} as const;
+    for(const [strategy,sides] of Object.entries(orientations)){
+      const settings={...getSettings(state),strategy:strategy as OptimizerSettings['strategy']};
+      const structures=[...enumerateStructures(prepareOptimization(state,settings))];expect(structures.length).toBeGreaterThan(0);
+      for(const p of structures){
+        expect(p.map(x=>x.side)).toEqual(sides);
+        expect(p[0].contract.strike).toBeLessThan(p[1].contract.strike);
+        expect(p[0].contract.optionType).toBe(strategy.endsWith('CALL')?'CALL':'PUT');
+        expect(state.optionChain).toContain(p[0].contract);
+      }
+    }
   });
   it('enumerates asymmetric iron condors with four distinct ordered strikes',()=>{
     const state=makeState(),settings={...getSettings(state),strategy:'IRON_CONDOR' as const};

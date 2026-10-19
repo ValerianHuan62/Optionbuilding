@@ -128,7 +128,7 @@ export function* enumerateStructures(prep: Prepared): Generator<Position[]> {
     for(let i=0;i<pool.length;i++) for(let j=i+1;j<pool.length;j++) {
       const a=pool[i],b=pool[j]; if(!within(a,b)) continue;
       const bull=settings.strategy.startsWith('BULL');
-      const first:Side=settings.strategy.endsWith('CALL')?(bull?'LONG':'SHORT'):(bull?'SHORT':'LONG');
+      const first:Side=bull?'LONG':'SHORT';
       const short=first==='SHORT'?a:b; if(!nearAtm(short)) continue;
       if(settings.strategy==='BEAR_CALL'&&settings.bearCallAtmFilter&&short.strike<state.spot-settings.atmTolerance) continue;
       yield [leg(a,first),leg(b,first==='LONG'?'SHORT':'LONG')];
