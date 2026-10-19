@@ -8,6 +8,7 @@ import surface from 'plotly.js/lib/surface';
 import { Activity, ArrowDownToLine, ArrowUpFromLine, BarChart3, Check, ChevronDown, Copy, Download, Pause, Play, Plus, RotateCcw, Save, ShieldAlert, X } from 'lucide-react';
 import type { Layout, Data } from 'plotly.js';
 import type { ActivePosition, GreekValues, OptionContract, OptionLeg, OptionType, SavedStrategy, Side, WorkbenchState } from './models/option';
+import DatabaseChainPicker, { databaseLoadedSettings, type DatabaseChain } from './DatabaseChainPicker';
 import { contractIdFor, legsFromChain, migrateWorkbenchState, parseOptionChainText, savedPositionsToLegs, type ChainImportPreview } from './utils/optionChain';
 import { dividendYieldFor, fixedDividendYield } from './utils/dividendYield';
 import { analyzePayoff } from './engine/payoffAnalyzer';
@@ -88,6 +89,16 @@ export default function App() {
   }, [strategy?.name]);
 
   const set = <K extends keyof WorkbenchState>(key: K, value: WorkbenchState[K]) => setState(s => ({ ...s, [key]: value }));
+  const loadDatabaseChain = (data: DatabaseChain) => {
+    const sameSnapshot = state.underlying === data.underlying && state.valuationDate === data.valuationDate;
+    if (state.activeStrategy.length && !sameSnapshot && !window.confirm('载入新的估值日或品种会清空当前活动策略。继续载入数据库期权链？')) return false;
+    const loaded = databaseLoadedSettings(data, state, state.expiry);
+    setState(current => ({ ...current, ...loaded, optionChain: data.rows,
+      ...(sameSnapshot ? {} : { activeStrategy: [], activeSavedStrategyId: null }) }));
+    setChainExpiry(loaded.expiry); setCompareIds([]);
+    if (!sameSnapshot) { setSaveName(''); setStrategyNotes(''); }
+    return true;
+  };
   const updateContract = (contractId: string, patch: Partial<OptionContract>) => set('optionChain', state.optionChain.map(c => c.contractId === contractId ? { ...c, ...patch, ...(Object.hasOwn(patch,'premium') ? {marketPremium:patch.premium} : {}), ...(Object.hasOwn(patch,'marketPremium') ? {premium:patch.marketPremium} : {}) } : c));
   const selectedContracts = state.optionChain.filter(c => c.underlying === state.underlying && c.expiry === chainExpiry).sort((a,b)=>a.strike-b.strike || a.optionType.localeCompare(b.optionType));
   const chainStrikes = [...new Set(selectedContracts.map(c=>c.strike))].sort((a,b)=>a-b);
@@ -264,6 +275,7 @@ export default function App() {
       <div className="instrument-cell"><label>CONTRACT MULTIPLIER / 元·点⁻¹</label><input type="number" value={state.multiplier} onChange={e => set('multiplier',+e.target.value)} /></div>
       <div className="instrument-cell model-select"><label>PRICING MODEL / 定价</label><b>BLACK–SCHOLES–MERTON</b></div>
     </section>
+    <DatabaseChainPicker underlying={state.underlying} onLoaded={loadDatabaseChain}/>
     {state.migrationNote&&<div className="notice-strip warning"><ShieldAlert size={14}/>{state.migrationNote}</div>}
     <div className="workspace-grid">
       <aside className="panel builder-panel chain-panel">

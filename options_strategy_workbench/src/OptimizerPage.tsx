@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Check, ChevronDown, Plus, RotateCcw, Upload, X } from 'lucide-react';
 import type { WorkbenchState } from './models/option';
 import { INITIAL } from './App';
+import DatabaseChainPicker, { databaseLoadedSettings, type DatabaseChain } from './DatabaseChainPicker';
 import { migrateWorkbenchState, parseOptionChainText } from './utils/optionChain';
 import { dividendYieldFor } from './utils/dividendYield';
 import { grossExpirationPnl } from './engine/payoff';
@@ -60,6 +61,15 @@ export default function OptimizerPage(){
   },[result,settings.scenarios,sweepIndex,metric,locked,probabilityError]);
   const heatScale=useMemo(()=>Math.max(1,...top.flatMap(c=>[...c.scenarioPnls.map(x=>Math.abs(x)),c.maxProfit==='UNLIMITED'?0:Math.abs(c.maxProfit),c.maxLoss==='UNLIMITED'?0:c.maxLoss])) , [top]);
   const setConfig=(patch:Partial<OptimizerSettings>,invalidate=true)=>{setSettings(s=>({...s,...patch}));if(invalidate)setResult(null);};
+  const loadDatabaseChain=(data:DatabaseChain)=>{
+    const sameSnapshot=state.underlying===data.underlying&&state.valuationDate===data.valuationDate;
+    if(state.activeStrategy.length&&!sameSnapshot&&!window.confirm('载入新的估值日或品种会清空当前活动策略。继续载入数据库期权链？'))return false;
+    const loaded=databaseLoadedSettings(data,state,state.expiry);
+    const next={...state,...loaded,optionChain:data.rows,...(sameSnapshot?{}:{activeStrategy:[],activeSavedStrategyId:null})};
+    setState(next);localStorage.setItem('options-workbench-v1',JSON.stringify(next));
+    setConfig({underlying:loaded.underlying,expiry:loaded.expiry});setMessage('数据库期权链已与策略工作台同步。');setImportedCount(0);
+    return true;
+  };
   const changeScenario=(id:string,patch:Partial<Scenario>,onlyProbability=false)=>{setSettings(s=>({...s,scenarios:s.scenarios.map(x=>x.id===id?{...x,...patch}:x)}));if(!onlyProbability)setResult(null);};
   const changeProbability=(index:number,value:number)=>{if(probabilityMode==='AUTO'){
     const next=shiftProbability(settings.scenarios,index,value,locked);if(next)setConfig({scenarios:next},false);else setMessage('锁定的概率过多，无法保持总和 100%。');
@@ -94,6 +104,7 @@ export default function OptimizerPage(){
     <div className="optimizer-context"><span>01 选择策略</span><span>02 设置情景</span><span>03 审核报价与风险</span><span>04 查看排名</span></div>
     <div className="optimizer-layout">
       <section className="optimizer-card optimizer-config"><div className="optimizer-card-head"><span>01 / SEARCH UNIVERSE</span><h2>策略与搜索范围</h2></div>
+        <DatabaseChainPicker underlying={settings.underlying} onLoaded={loadDatabaseChain}/>
         <div className="optimizer-fields two"><label>品种<select value={settings.underlying} onChange={e=>{const underlying=e.target.value;const expiry=state.optionChain.find(c=>c.underlying===underlying)?.expiry??state.expiry;setConfig({underlying,expiry});}}>{['HO · 上证50','IO · 沪深300','MO · 中证1000'].map(x=><option key={x}>{x}</option>)}</select></label><label>到期日<select value={settings.expiry} onChange={e=>setConfig({expiry:e.target.value})}>{expiryChoices.length?expiryChoices.map(x=><option key={x}>{x}</option>):<option>{settings.expiry}</option>}</select></label></div>
         <label className="optimizer-field">策略结构<select value={settings.strategy} onChange={e=>setConfig({strategy:e.target.value as StrategyKind})}>{Object.entries(labels).map(([key,value])=><option value={key} key={key}>{value}</option>)}</select></label>
         <div className="optimizer-source"><div><strong>{active.length}</strong><span>当前期权链合约</span></div><div><strong>{active.filter(c=>c.bid!=null&&c.ask!=null).length}</strong><span>含 Bid / Ask</span></div><div><strong>{active.filter(c=>c.impliedVolatility!=null).length}</strong><span>含 IV</span></div></div>
