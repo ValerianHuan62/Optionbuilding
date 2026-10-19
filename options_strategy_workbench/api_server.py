@@ -216,14 +216,15 @@ def research(trade_date: str, filters: dict | None = None) -> dict:
                 break
             if row["date"] >= (market_rows[0]["date"] if market_rows else trade_date):
                 underlying.append({"date": row["date"], "open": float(row["open"]), "high": float(row["high"]),
-                                   "low": float(row["low"]), "close": float(row["close"]), "volume": None})
+                                   "low": float(row["low"]), "close": float(row["close"]),
+                                   "volume": int(float(row["volume"])) if row.get("volume") else None})
     data = {"valuationDate": trade_date, "cutoff": trade_date, "underlying": underlying,
             "market": market_rows, "expiries": expiry_history, "chain": chain_rows,
             "methodology": {"ivModel": "BSM", "ivSource": "option_greeks_daily · bsm-spot-q-shibor-v1.0",
                             "priceSource": "Database precomputed IV using stored price_used; bid/ask quality rechecked",
                             "forwardSource": "forward_daily ROBUST PUT-CALL PARITY", "rateSource": "same-date SHIBOR in market_daily",
                             "dayCount": "ACT/365", "minimumDte": active_filters["minimum_dte"],
-                            "indexVolume": "DATA UNAVAILABLE · market_daily has no index volume field"},
+                            "indexVolume": "本地中证1000历史行情 · Excel 成交量字段"},
             "qualityFilters": active_filters}
     if len(RESEARCH_CACHE) >= 24:
         RESEARCH_CACHE.pop(next(iter(RESEARCH_CACHE)))
