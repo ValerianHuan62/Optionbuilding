@@ -190,3 +190,4 @@
 .chain-scroll{flex:none;min-height:0;max-height:none;overflow-x:auto;overflow-y:visible}
 .active-strategy{max-height:none;overflow:visible}
 .strategy-library .saved-list{max-height:none;overflow:visible}
+.database-chain-picker .database-date-part{gap:4px}.database-chain-picker .database-date-part select{min-width:58px}.database-chain-picker>label:not(.database-date-part)+.database-date-part{margin-left:-5px}

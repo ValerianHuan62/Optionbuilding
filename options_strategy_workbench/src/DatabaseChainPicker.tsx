@@ -23,6 +23,10 @@ export default function DatabaseChainPicker({ underlying, onLoaded }: Props) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const available = useMemo(() => products.find(item => item.code === product), [products, product]);
+  const years = useMemo(() => [...new Set((available?.dates ?? []).map(item => item.slice(0, 4)))].sort((a, b) => b.localeCompare(a)), [available]);
+  const [selectedYear, selectedMonth, selectedDay] = tradeDate.split('-');
+  const months = useMemo(() => [...new Set((available?.dates ?? []).filter(item => item.startsWith(`${selectedYear}-`)).map(item => item.slice(5, 7)))].sort((a, b) => b.localeCompare(a)), [available, selectedYear]);
+  const days = useMemo(() => (available?.dates ?? []).filter(item => item.startsWith(`${selectedYear}-${selectedMonth}-`)).map(item => item.slice(8, 10)).sort((a, b) => b.localeCompare(a)), [available, selectedYear, selectedMonth]);
 
   useEffect(() => {
     let active = true;
@@ -74,11 +78,23 @@ export default function DatabaseChainPicker({ underlying, onLoaded }: Props) {
     <label>品种<select value={product} onChange={event => {
       const next = event.target.value;
       const firstDate = products.find(item => item.code === next)?.dates[0] ?? '';
-      setProduct(next); setTradeDate(firstDate); void load(next, firstDate);
+      setProduct(next); setTradeDate(firstDate);
     }}>{products.map(item => <option key={item.code} value={item.code}>{item.label}</option>)}</select></label>
-    <label>估值日<select value={tradeDate} onChange={event => {
-      const next = event.target.value; setTradeDate(next); void load(product, next);
-    }}>{(available?.dates ?? []).map(item => <option key={item} value={item}>{item}</option>)}</select></label>
+    <label>估值日</label>
+    <label className="database-date-part">年<select value={selectedYear ?? ''} onChange={event => {
+      const year = event.target.value;
+      const yearDates = (available?.dates ?? []).filter(item => item.startsWith(`${year}-`));
+      setTradeDate(yearDates[0] ?? '');
+    }}>{years.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
+    <label className="database-date-part">月<select value={selectedMonth ?? ''} onChange={event => {
+      const month = event.target.value;
+      const monthDates = (available?.dates ?? []).filter(item => item.startsWith(`${selectedYear}-${month}-`));
+      setTradeDate(monthDates[0] ?? '');
+    }}>{months.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
+    <label className="database-date-part">日<select value={selectedDay ?? ''} onChange={event => {
+      const next = `${selectedYear}-${selectedMonth}-${event.target.value}`;
+      setTradeDate(next); void load(product, next);
+    }}>{days.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
     <button type="button" disabled={busy || !tradeDate} onClick={() => void load()}><RefreshCw size={13}/>{busy ? '读取中' : '载入期权链'}</button>
     <small role="status">{message || (available ? `${available.dates.length} 个历史估值日` : '正在连接数据库…')}</small>
   </section>;
