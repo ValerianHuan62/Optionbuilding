@@ -71,6 +71,13 @@ describe('Strike Optimizer',()=>{
     low.marketPremium=oldLow;high.marketPremium=oldHigh;high.impliedVolatility=null;
     expect(assessQuoteQuality(pair,state,settings,16).issues.some(x=>x.includes('IV 无效'))).toBe(true);
     high.impliedVolatility=.25;
+    low.quoteAt='2026-10-14T15:00:00+08:00';high.quoteAt=low.quoteAt;
+    low.ivAt='2026-10-14';high.ivAt='2026-10-14';
+    const dateOnlyQuality=assessQuoteQuality(pair,state,settings,16);
+    expect(dateOnlyQuality.status).toBe('WARNING');
+    expect(dateOnlyQuality.issues.some(x=>x.includes('相差超过 5 分钟'))).toBe(false);
+    high.ivAt='2026-10-13';
+    expect(assessQuoteQuality(pair,state,settings,16).issues.some(x=>x.includes('IV 与行情日期不同'))).toBe(true);
     low.quoteAt='2026-10-14T15:00:00+08:00';high.quoteAt='2026-10-14T15:10:00+08:00';
     low.ivAt=low.quoteAt;high.ivAt=high.quoteAt;
     expect(assessQuoteQuality(pair,state,settings,16).issues).toContain('逐腿行情时间相差超过 5 分钟');

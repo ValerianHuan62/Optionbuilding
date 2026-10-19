@@ -168,9 +168,11 @@ export function assessQuoteQuality(positions: Position[], state: WorkbenchState,
     if(itm>=.08&&c.impliedVolatility!>=.8)warnings.push(`${c.contractId}：深度 ITM 且 IV ≥ 80%，请核对反算输入`);
     if(c.quoteAt&&c.ivAt){
       const quoteTime=Date.parse(c.quoteAt),ivTime=Date.parse(c.ivAt);
+      const quoteDateOnly=/^\d{4}-\d{2}-\d{2}$/.test(c.quoteAt),ivDateOnly=/^\d{4}-\d{2}-\d{2}$/.test(c.ivAt);
       if(!Number.isFinite(quoteTime)||!Number.isFinite(ivTime))reject.push(`${c.contractId}：行情或 IV 时间无效`);
+      else if(c.quoteAt.slice(0,10)!==c.ivAt.slice(0,10))reject.push(`${c.contractId}：IV 与行情日期不同`);
+      else if(quoteDateOnly||ivDateOnly)warnings.push(`${c.contractId}：IV 或报价仅有日期，无法核验盘中同步`);
       else if(Math.abs(quoteTime-ivTime)>5*60_000)reject.push(`${c.contractId}：IV 与报价时间相差超过 5 分钟`);
-      else if(/^\d{4}-\d{2}-\d{2}$/.test(c.quoteAt)||/^\d{4}-\d{2}-\d{2}$/.test(c.ivAt))warnings.push(`${c.contractId}：仅有日期，无法核验 IV 与报价盘中同步`);
     }else warnings.push(`${c.contractId}：缺少 IV / 报价独立时间，无法核验同步`);
   }
   for(const type of ['CALL','PUT'] as const){
