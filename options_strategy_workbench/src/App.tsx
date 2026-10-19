@@ -16,6 +16,7 @@ import { aggregateGreeks, legGreeks } from './engine/pricing';
 import { classifyStrategy, shouldNotifyStrategy } from './engine/strategyClassifier';
 import { scenarioPnl } from './engine/scenario';
 import { calculateScenarioGrid, commonPriceGrid, hasCommonExpiry } from './engine/scenarioGrid';
+import { DEFAULT_SCENARIOS, type Scenario } from './engine/optimizer';
 import { marginForContract, marginForLeg, type MarginParams } from './engine/margin';
 import { DEFAULT_GREEK_RAW_PROFILE } from './engine/greeks';
 import { legIsValid, legStructureIsValid } from './utils/validation';
@@ -38,6 +39,13 @@ const fmtGreek = (key: keyof GreekValues, value: number) => new Intl.NumberForma
 const signedGreek = (key: keyof GreekValues, value: number) => `${value > 0 ? '+' : ''}${fmtGreek(key, value)}`;
 const displayGreek = (key: keyof GreekValues, value: number) => `${signedGreek(key, value)}${greekLabels[key][1] ? ` ${greekLabels[key][1]}` : ''}`;
 const escapeCsv = (v: unknown) => `"${String(v ?? '').replaceAll('"', '""')}"`;
+const storedAttributionScenarios = (): Scenario[] => {
+  try {
+    const saved = JSON.parse(localStorage.getItem('options-strike-optimizer-v1') ?? 'null') as { scenarios?: unknown } | null;
+    if (Array.isArray(saved?.scenarios) && saved.scenarios.length && saved.scenarios.every((s: any) => s && typeof s.name === 'string' && [s.movePct,s.ivPp,s.days].every(Number.isFinite))) return saved.scenarios as Scenario[];
+  } catch { /* use the optimizer's standard scenario set */ }
+  return DEFAULT_SCENARIOS;
+};
 
 export default function App() {
   const [state, setState] = useState<WorkbenchState>(() => {
@@ -54,6 +62,7 @@ export default function App() {
   const [priceShift, setPriceShift] = useState(() => Number(sessionStorage.getItem('optimizer-scenario-move') ?? 0));
   const [ivShift, setIvShift] = useState(() => Number(sessionStorage.getItem('optimizer-scenario-iv') ?? 0));
   const [daysForward, setDaysForward] = useState(() => Number(sessionStorage.getItem('optimizer-scenario-days') ?? 0));
+  const [attributionScenarios] = useState<Scenario[]>(storedAttributionScenarios);
   useEffect(() => { sessionStorage.removeItem('optimizer-scenario-move'); sessionStorage.removeItem('optimizer-scenario-iv'); sessionStorage.removeItem('optimizer-scenario-days'); sessionStorage.removeItem('optimizer-compare-ids'); }, []);
   const [saveName, setSaveName] = useState('');
   const [strategyNotes, setStrategyNotes] = useState('');
@@ -79,6 +88,25 @@ export default function App() {
   // Base valuation Greeks use unshocked spot, IV and time. Scenario sliders only change PnL.
   const greekRows = useMemo(() => activeLegs.map(l => ({ id: l.id, values: legGreeks(l, { spot: state.spot, rate: state.riskFreeRate, dividend: dividendYield, days: daysForLeg(l,state) }) })), [activeLegs,state.spot,state.riskFreeRate,state.valuationDate,dividendYield]);
   const portfolioGreeks = useMemo(() => invalidLegInput ? aggregateGreeks([]) : aggregateGreeks(greekRows.map(r => r.values)), [greekRows, invalidLegInput]);
+  const pnlAttributions = useMemo(() => {
+    if (invalidInput || !validLegs.length) return [];
+    return attributionScenarios.map(scenario => {
+      const spotChange = state.spot * scenario.movePct / 100;
+      const component = (key: 'delta'|'gamma'|'vega'|'theta', scale: (greek: number) => number) => {
+        if (greekRows.some((row, index) => validLegs[index] && row.values[key] === null)) return null;
+        return greekRows.reduce((sum, row, index) => sum + (row.values[key] ?? 0) * (validLegs[index]?.multiplier ?? 0) * scale(row.values[key] ?? 0), 0);
+      };
+      const delta = component('delta', () => spotChange);
+      const gamma = component('gamma', () => .5 * spotChange * spotChange);
+      const vega = component('vega', () => scenario.ivPp);
+      const theta = component('theta', () => scenario.days);
+      const actual = scenarioPnl(validLegs, { spot: state.spot * (1 + scenario.movePct / 100), valuationDate: state.valuationDate ?? TODAY,
+        daysToExpiryByLeg: Object.fromEntries(validLegs.map(leg => [leg.id, daysForLeg(leg,state)])), daysForward: scenario.days,
+        ivShift: scenario.ivPp / 100, rate: state.riskFreeRate, dividend: dividendYield });
+      const residual = actual === null || [delta,gamma,vega,theta].some(value => value === null) ? null : actual - delta! - gamma! - vega! - theta!;
+      return { id: scenario.id, name: scenario.name, delta, gamma, vega, theta, residual, total: actual };
+    });
+  }, [attributionScenarios, invalidInput, validLegs, greekRows, state.spot, state.valuationDate, state.riskFreeRate, dividendYield]);
   useEffect(() => { localStorage.setItem('options-workbench-v1', JSON.stringify(state)); }, [state]);
   useEffect(() => { setPlaying(false); }, [state.activeStrategy]);
   useEffect(() => {
@@ -313,6 +341,14 @@ export default function App() {
           <div className={`scenario-visuals ${scenarioView==='2D HEATMAP'?'mode-2d':scenarioView==='3D SURFACE'?'mode-3d-surface':'mode-3d-cube'}`}><div className="scenario-heat"><div className="section-title"><span>PRICE × IV PNL MAP</span><small>单位：元 · BSM 逐腿重定价</small></div>{validLegs.length && scenarioValid ? <Plot data={[{ type:'heatmap', zmin:-surfaceAbsMax,zmax:surfaceAbsMax,zmid:0,x:scenarioGrid.ps, y:scenarioGrid.vs, z:scenarioGrid.z as number[][], colorscale:[[0,'#c87868'],[.5,'#f7f7f5'],[1,'#698d7d']], customdata:scenarioGrid.vs.map(v=>scenarioGrid.ps.map(p=>state.spot*(1+p/100))), hovertemplate:'标的价格 %{customdata:.2f} 点<br>标的涨跌幅 %{x:.1f}%<br>IV 变化 %{y:.1f}pp<br>时间推进 +'+daysForward+' 天<br>组合 PnL %{z:,.2f} 元<extra></extra>', colorbar:{thickness:8,outlinewidth:0,tickfont:{size:9}} },{type:'scatter',mode:'markers',x:[priceShift],y:[ivShift],marker:{size:9,color:'#f06b4f',symbol:'circle-open',line:{width:2,color:'#f06b4f'}},cliponaxis:true,hoverinfo:'skip',showlegend:false}]} layout={{ autosize:true,height:232,margin:{l:52,r:34,t:8,b:36},paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'rgba(0,0,0,0)',font:{family:'IBM Plex Mono, monospace',size:9,color:'#788084'},xaxis:{title:{text:'标的价格变化 / UNDERLYING MOVE'},range:[-11,11],ticksuffix:'%',dtick:5,gridcolor:'#e9ebea'},yaxis:{title:{text:'IV 变化 / IV SHIFT'},range:[-11,11],ticksuffix:'pp',dtick:5,gridcolor:'#e9ebea'} }} config={{responsive:true,displaylogo:false}} useResizeHandler style={{width:'100%',height:'100%'}}/> : <div className="heat-empty">{invalidInput?'修正无效输入以恢复情景网格':(!scenarioValid)?'检查标的价格和每腿 IV':'添加期权腿后显示价格与波动率情景网格'}</div>}</div><div className="scenario-heat time-curve"><div className="section-title"><span>PNL BY REMAINING TIME</span><small>价格 ±10% · IV {ivShift>0?'+':''}{ivShift}pp</small></div>{validLegs.length && scenarioValid ? <Plot data={timeCurves.days.map((d,i)=>({type:'scatter',mode:'lines',x:timeCurves.priceMoves.map(p=>`${p.toFixed(1)}%`),y:timeCurves.pnl[i] as (number|null)[],name:d===0?'今天':`${d}天后`,line:{width:i===1?2:1.2,dash:i===0?'dot':'solid',color:['#a4acae','#3f484b','#ff7759'][i]},hovertemplate:`${d===0?'今天':`${d}天后`}<br>标的价格变化 %{x}<br>时间推进 ${d} 天<br>损益 %{y:,.2f} 元<extra></extra>`}))} layout={{autosize:true,height:232,margin:{l:52,r:12,t:28,b:36},paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'rgba(0,0,0,0)',font:{family:'IBM Plex Mono, monospace',size:9,color:'#788084'},xaxis:{title:{text:'UNDERLYING MOVE'},gridcolor:'#e9ebea'},yaxis:{title:{text:'PNL · CNY'},gridcolor:'#e9ebea'},showlegend:true,legend:{orientation:'h',x:0,y:1.16,font:{size:8}}}} config={{responsive:true,displaylogo:false}} useResizeHandler style={{width:'100%',height:'100%'}}/> : <div className="heat-empty">{(!scenarioValid)?'检查标的价格和每腿 IV':'添加期权腿后显示不同时间推进的损益曲线'}</div>}</div><div className="assumption-note"><div className="section-title"><span>MODEL SETTINGS</span><small>BSM ONLY</small></div><label>RISK-FREE RATE <input type="number" step="0.01" value={state.riskFreeRate} onChange={e=>set('riskFreeRate',+e.target.value)}/> <b>%</b></label><label>DIVIDEND YIELD {fixedYield!==null&&<small>INDEX FIXED</small>}<input type="number" step="0.01" value={dividendYield} readOnly={fixedYield!==null} onChange={e=>set('dividendYield',+e.target.value)}/> <b>%</b></label><small className="assumption-copy">BSM 使用建仓现货、逐腿 IV、剩余期限、利率及股息率。情景滑块改变情景 PnL 和下方 Scenario Greeks；右侧 Portfolio Greeks 固定在建仓估值点。费用不计入。</small></div></div>
           {scenarioView!=='2D HEATMAP'&&<div className="scenario-3d"><div className="section-title"><span>{scenarioView}</span><small>{scenarioView==='3D SURFACE'?'X PRICE 点 · Y IV pp · Z PNL 元':'Z TIME DAYS · COLOR PNL 元'}</small></div>{validLegs.length&&scenarioValid?<Plot data={scenarioView==='3D SURFACE'?surfaceData:cubeData} layout={scenarioView==='3D SURFACE'?threeDLayout:cubeLayout} config={{responsive:true,displaylogo:false,toImageButtonOptions:{format:'png',filename:scenarioView==='3D SURFACE'?'scenario-surface':'scenario-cube',width:1500,height:1100,scale:2}}} useResizeHandler style={{width:'100%',height:'100%'}}/>:<div className="heat-empty">检查每腿 IV 和标的价格后计算三维情景。</div>}<div className="surface-note">时间滑块与播放动画会对每个情景逐腿重新定价。零收益位于中性色，标记为当前标的 / IV / 天数情景。</div></div>}
           <div className="scenario-greeks"><div className="section-title"><span>SCENARIO GREEKS · BSM</span><small>随情景变化 · 不改建仓 Greeks</small></div>{greekKeys.map(k=><div key={k}><span>{greekLabels[k][0]}</span><b className={scenarioGreeks[k]===null?'muted':scenarioGreeks[k]!>=0?'positive-text':'negative-text'}>{scenarioGreeks[k]===null?'N/A':displayGreek(k,scenarioGreeks[k]!)}</b></div>)}</div>
+
+          <section className="pnl-attribution">
+            <div className="section-title"><span>损益分析 / PNL ATTRIBUTION</span><small>{attributionScenarios.length} 个情景 · 初始 Greeks</small></div>
+            <p>Delta = 初始 Delta × ΔS；Gamma = ½ × 初始 Gamma × ΔS²；Vega = 初始 Vega × ΔIV；Theta = 初始 Theta × 天数。以上均按方向、手数及合约乘数折算为元。合计为逐腿 BSM 重定价 PnL；残差/高阶 = 合计 − 四项归因。</p>
+            <div className="pnl-attribution-scroll"><table><thead><tr><th>情景</th><th>Delta 项</th><th>Gamma 项</th><th>Vega 项</th><th>Theta 项</th><th>残差/高阶</th><th>合计</th></tr></thead><tbody>
+              {pnlAttributions.length ? pnlAttributions.map((row,index)=><tr key={row.id}><th><b>{String(index+1).padStart(2,'0')}</b><span>{row.name}</span><small>{attributionScenarios[index].movePct>0?'+':''}{fmt(attributionScenarios[index].movePct)}% · IV {attributionScenarios[index].ivPp>0?'+':''}{fmt(attributionScenarios[index].ivPp)}pp · +{attributionScenarios[index].days}天</small></th>{(['delta','gamma','vega','theta','residual','total'] as const).map(key=>{const value=row[key];return <td key={key} className={value===null?'muted':value>=0?'positive-text':'negative-text'}>{value===null?'N/A':money(value)}</td>;})}</tr>) : <tr><td colSpan={7} className="pnl-attribution-empty">{invalidInput?'请先修正无效输入。':'添加期权腿后显示各市场情景的损益归因。'}</td></tr>}
+            </tbody></table></div>
+          </section>
 
           <div className="scenario-disclaimer">情景 PnL 用 BSM 按情景现货、IV 与剩余期限逐腿重定价，再相对入场权利金汇总；不扣交易成本。若逐档 IV 使同到期组合估值超出贴现后的到期结构界限，情景显示 N/A，需核对 IV 曲面与模型输入。</div>
         </section>
