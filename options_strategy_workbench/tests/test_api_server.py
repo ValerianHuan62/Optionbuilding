@@ -22,6 +22,7 @@ class ResearchEndpointTests(unittest.TestCase):
         self.assertEqual(data["cutoff"], "2024-01-02")
         self.assertTrue(all(row["date"] <= "2024-01-02" for row in data["market"]))
         self.assertTrue(all(row["date"] <= "2024-01-02" for row in data["underlying"]))
+        self.assertTrue(all(row["volume"] is None for row in data["underlying"]))
         sql = "\n".join(call.args[0] for call in query.call_args_list)
         self.assertIn("o.date <= '2024-01-02'", sql)
         self.assertIn("o.date='2024-01-02'", sql)
