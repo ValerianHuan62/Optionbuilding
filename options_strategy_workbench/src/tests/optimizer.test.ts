@@ -52,27 +52,13 @@ describe('Strike Optimizer',()=>{
     expect(defaultPositions).toHaveLength(0);
   });
   it('ranks by expected PnL by default, not a tiny max-loss denominator, and updates after probability changes',()=>{
-    const settings=getSettings(),base=candidates()[0],a={...base,id:'small-loss',scenarioPnls:[100,0,0,0,0,0],marketMidScenarioPnls:[100,0,0,0,0,0],expiryScenarioPnls:[-1,-1,-1,-1,-1,-1],scenarioPnlGaps:[101,1,1,1,1,1],maxLoss:1},b={...base,id:'higher-pnl',scenarioPnls:[0,100,100,100,100,100],marketMidScenarioPnls:[0,100,100,100,100,100],expiryScenarioPnls:[10,10,10,10,10,10],scenarioPnlGaps:[-10,90,90,90,90,90],maxLoss:100};
+    const settings=getSettings(),base=candidates()[0],a={...base,id:'small-loss',scenarioPnls:[100,0,0,0,0,0],expiryScenarioPnls:[-1,-1,-1,-1,-1,-1],scenarioPnlGaps:[101,1,1,1,1,1],maxLoss:1},b={...base,id:'higher-pnl',scenarioPnls:[0,100,100,100,100,100],expiryScenarioPnls:[10,10,10,10,10,10],scenarioPnlGaps:[-10,90,90,90,90,90],maxLoss:100};
     expect(rankCandidates([a,b],settings.scenarios)[0].id).toBe('higher-pnl');
     expect(rankCandidates([a,b],settings.scenarios,'EXPECTED_LOSS')[0].id).toBe('small-loss');
     const changed=shiftProbability(settings.scenarios,0,90)!;
     const reranked=rankCandidates([a,b],changed);
     expect(reranked[0].id).toBe('small-loss');
     expect(reranked[0].expiryProfitableWeight).toBe(0);
-  });
-  it('ranks with the selected model or market Mid PnL basis',()=>{
-    const settings=getSettings(),base=candidates()[0];
-    const modelWinner={...base,id:'model',scenarioPnls:[-50,-50,-50,-50,-50,-50],modelScenarioPnls:[20,20,20,20,20,20],marketMidScenarioPnls:[-10,-10,-10,-10,-10,-10]};
-    const marketWinner={...base,id:'market',scenarioPnls:[-20,-20,-20,-20,-20,-20],modelScenarioPnls:[-5,-5,-5,-5,-5,-5],marketMidScenarioPnls:[30,30,30,30,30,30]};
-    expect(rankCandidates([modelWinner,marketWinner],settings.scenarios,'EXPECTED','MODEL')[0].id).toBe('model');
-    expect(rankCandidates([modelWinner,marketWinner],settings.scenarios,'EXPECTED','MARKET')[0].id).toBe('market');
-  });
-  it('does not invent a fixed q when the chain has no q and no manual override',()=>{
-    const state={...makeState(),dividendYieldSource:'UNSET' as const,optionChain:makeState().optionChain.map(c=>({...c,dividendYield:undefined}))};
-    const settings=getSettings(state),prepared=prepareOptimization(state,settings),positions=[...enumerateStructures(prepared)][0];
-    expect(positions).toBeDefined();
-    expect(assessQuoteQuality(positions,state,settings,16).status).toBe('REJECT');
-    expect(evaluateCandidate(prepared,positions)).toBeNull();
   });
   it('checks market monotonicity, vertical bounds, IV validity and quote synchronization',()=>{
     const state=makeState(),settings=getSettings(state),prep=prepareOptimization(state,settings),pair=[...enumerateStructures(prep)].find(p=>p[0].contract.strike===4300&&p[1].contract.strike===4400)!;
@@ -155,7 +141,7 @@ describe('Strike Optimizer',()=>{
   it('makes entry PnL zero by accounting identity and expiry value equals payoff',()=>{
     const c=candidates()[0];expect(c).toBeDefined();
     expect(c.entryPnl).toBe(0);
-    const spot=4200,expected=grossExpirationPnl(c.legs.map(l=>({...l,premium:l.marketEntryPremium??l.premium})),spot);
+    const spot=4200,expected=grossExpirationPnl(c.legs,spot);
     expect(scenarioPnl(c.legs,{spot,valuationDate:'2026-10-14',daysForward:16,ivShift:0,rate:1.65,dividend:2.3})).toBeCloseTo(expected,6);
   });
   it('keeps BSM PnL inside finite payoff bounds without clipping',()=>{

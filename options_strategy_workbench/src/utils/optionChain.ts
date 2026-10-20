@@ -258,13 +258,10 @@ export function parseOptionChainText(text: string, context: ChainImportContext):
       const quoteAt=quoteColumn?cells[headers.indexOf(quoteColumn)]?.trim()||null:null;
       const ivColumn=[`${side}ivat`,`${side}ivtime`,'ivat','ivtime'].find(name=>headers.includes(name));
       const ivAt=ivColumn?cells[headers.indexOf(ivColumn)]?.trim()||null:null;
-      const modelSpot=numberAt(cells,'modelspot')??numberAt(cells,'spot'), modelRate=numberAt(cells,'modelrate');
-      const modelTime=numberAt(cells,'modeltime'), dividendYield=numberAt(cells,'dividendyield');
       contracts.push({ contractId: sourceContractId || contractIdFor(underlying, rowExpiry, type, strike), underlying,
         optionType: type, strike, expiry: rowExpiry, multiplier: context.multiplier, premium:premium ?? (bid!==null&&ask!==null?(bid+ask)/2:null), marketPremium:premium ?? (bid!==null&&ask!==null?(bid+ask)/2:null), settlementPrice,
         bid,ask,last,volume,openInterest,quoteAt,ivAt,quoteStatus: headers.includes(`${side}quotestatus`) ? cells[headers.indexOf(`${side}quotestatus`)]?.trim() : null,
-        impliedVolatility: iv, modelSpot:modelSpot??undefined, modelRate:modelRate??undefined, modelTime:modelTime??undefined, dividendYield:dividendYield??undefined,
-        qStatus:dividendYield==null?undefined:'CSV_PARITY', greeks: hasGreekValues ? { ...greeks, source: context.greekInputFormat ?? 'KUAIQI_RAW', snapshotAt } : greeks });
+        impliedVolatility: iv, greeks: hasGreekValues ? { ...greeks, source: context.greekInputFormat ?? 'KUAIQI_RAW', snapshotAt } : greeks });
     });
   });
   if (zeroIvCount) warnings.push(`${zeroIvCount} 个合约的 IV 显示为 0，按缺失值 N/A 导入；之后上传有效 IV 可更新。`);
@@ -273,7 +270,7 @@ export function parseOptionChainText(text: string, context: ChainImportContext):
     expiry: headers.includes('expiry')?first[headers.indexOf('expiry')]?.trim():undefined,
     underlying: headers.includes('underlying')?first[headers.indexOf('underlying')]?.trim():undefined,
     valuationDate: headers.includes('tradedate')?first[headers.indexOf('tradedate')]?.trim():undefined,
-    spot:firstNumber('modelspot')??firstNumber('spot'),riskFreeRate:firstNumber('modelrate')!=null?firstNumber('modelrate')!*100:firstNumber('riskfreerate') };
+    spot:firstNumber('spot'),riskFreeRate:firstNumber('riskfreerate') };
 }
 
 export function legsFromChain(chain: OptionContract[], positions: ActivePosition[]): OptionLeg[] {
@@ -285,8 +282,7 @@ export function legsFromChain(chain: OptionContract[], positions: ActivePosition
     if (premium === null) return [];
     return [{ id: `${position.contractId}:${position.side}`, optionType: contract.optionType, side: position.side, strike: contract.strike,
       premium, quantity: position.quantity, multiplier: contract.multiplier, expiry: contract.expiry,
-      iv: contract.impliedVolatility ?? Number.NaN, greeks: contract.greeks, modelSpot: contract.modelSpot, modelRate: contract.modelRate,
-      modelTime: contract.modelTime, dividendYield: contract.dividendYield, qStatus: contract.qStatus }];
+      iv: contract.impliedVolatility ?? Number.NaN, greeks: contract.greeks }];
   });
 }
 
@@ -295,7 +291,6 @@ export function savedPositionsToLegs(chain: OptionContract[], positions: { contr
     const contract = chain.find(c => c.contractId === position.contractId);
     if (!contract) return [];
     return [{ id: contract.contractId, optionType: contract.optionType, side: position.side, strike: contract.strike, premium: position.entryPremium,
-      quantity: position.quantity, multiplier: contract.multiplier, expiry: contract.expiry, iv: contract.impliedVolatility ?? Number.NaN, greeks: contract.greeks,
-      modelSpot: contract.modelSpot, modelRate: contract.modelRate, modelTime: contract.modelTime, dividendYield: contract.dividendYield, qStatus: contract.qStatus }];
+      quantity: position.quantity, multiplier: contract.multiplier, expiry: contract.expiry, iv: contract.impliedVolatility ?? Number.NaN, greeks: contract.greeks }];
   });
 }

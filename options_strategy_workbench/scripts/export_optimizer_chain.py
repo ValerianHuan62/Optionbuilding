@@ -16,12 +16,11 @@ import psycopg
 from psycopg.rows import dict_row
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mo_options_data_system" / "src"))
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "options_strategy_workbench"))
-from parity import estimate_group_q
+from options_system.bsm import bsm_implied_vol
 
 
 FIELDS = [
-    "tradeDate", "underlying", "expiry", "spot", "modelSpot", "modelRate", "modelTime", "dividendYield", "riskFreeRate", "strike",
+    "tradeDate", "underlying", "expiry", "spot", "riskFreeRate", "fixedDividendYield", "strike",
     *[f"{side}{field}" for side in ("call", "put") for field in (
         "ContractId", "Bid", "Ask", "Mid", "Last", "Volume", "OpenInterest",
         "QuoteStatus", "SettlementPrice", "IV")],
@@ -30,7 +29,7 @@ FIELDS = [
 SQL = """
 SELECT c.instrument_id, c.option_type, c.strike, c.expiry,
        o.bid, o.ask, o.mid, o.last, o.volume, o.open_interest,
-       o.quote_status, o.settle, g.r, g.iv, g.forward AS model_spot, g.t AS model_time,
+       o.quote_status, o.settle, g.r,
        m.index_close AS spot
 FROM contracts c
 JOIN option_daily o ON o.instrument_id = c.instrument_id
@@ -47,25 +46,26 @@ def export_chain(trade_date: date, expiry: date, output: Path, dsn: str | None =
         with conn.cursor() as cur:
             cur.execute(SQL, (trade_date, expiry))
             source = cur.fetchall()
-    model_spot = next((float(item["model_spot"]) for item in source if item["model_spot"] is not None), None)
-    model_rate = next((float(item["r"]) for item in source if item["r"] is not None), None)
-    q_estimate = None
-    if source and model_spot is not None and model_rate is not None:
-        parity_rows = [{"date": trade_date.isoformat(), "expiry": expiry.isoformat(), "strike": item["strike"],
-                        "option_type": item["option_type"], "bid": item["bid"], "ask": item["ask"]} for item in source]
-        q_estimate, _q_info, _pairs = estimate_group_q(parity_rows, model_spot, model_rate)
     rows: dict[float, dict] = {}
     for item in source:
         strike = item["strike"]
-        row = rows.setdefault(strike, {"tradeDate": trade_date.isoformat(), "underlying": "MO · 中证1000", "expiry": expiry.isoformat(), "spot": item["model_spot"] or item["spot"], "modelSpot": item["model_spot"], "modelRate": item["r"], "modelTime": item["model_time"], "dividendYield": q_estimate, "riskFreeRate": None, "strike": strike})
+        row = rows.setdefault(strike, {"tradeDate": trade_date.isoformat(), "underlying": "MO · 中证1000", "expiry": expiry.isoformat(), "spot": item["spot"], "riskFreeRate": None, "fixedDividendYield": 1.1, "strike": strike})
         side = "call" if item["option_type"] == "C" else "put"
+        days_to_expiry = (expiry - trade_date).days
+        fixed_iv = None
+        if (item["mid"] is not None and item["spot"] is not None and item["r"] is not None
+                and item["quote_status"] == "OK" and days_to_expiry > 0):
+            fixed_iv, _status = bsm_implied_vol(
+                item["option_type"], float(item["mid"]), float(item["spot"]), float(strike),
+                days_to_expiry / 365.0, float(item["r"]), 0.011,
+            )
         row.update({
             f"{side}ContractId": item["instrument_id"],
             f"{side}Bid": item["bid"], f"{side}Ask": item["ask"],
             f"{side}Mid": item["mid"], f"{side}Last": item["last"],
             f"{side}Volume": item["volume"], f"{side}OpenInterest": item["open_interest"],
             f"{side}QuoteStatus": item["quote_status"], f"{side}SettlementPrice": item["settle"],
-            f"{side}IV": item["iv"] * 100 if item["iv"] is not None else None,
+            f"{side}IV": fixed_iv * 100 if fixed_iv is not None else None,
         })
         if item["r"] is not None:
             row["riskFreeRate"] = item["r"] * 100

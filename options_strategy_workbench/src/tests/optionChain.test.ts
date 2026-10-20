@@ -55,18 +55,6 @@ describe('option chain ingestion and migration', () => {
     expect(analyzePayoff(legs).netDebit).toBeCloseTo(0);
   });
 
-  it('retains database BSM inputs and parity q when importing an exported optimizer chain', () => {
-    const csv = `tradeDate,underlying,expiry,spot,modelSpot,modelRate,modelTime,dividendYield,riskFreeRate,strike,callContractId,callMid,callIV,putContractId,putMid,putIV\n2025-01-02,MO · 中证1000,2025-01-17,5797.089,5797.089,0.0166,0.04109589,0.087,1.66,5800,MO2501-C-5800,120,24,MO2501-P-5800,110,25`;
-    const preview = parseOptionChainText(csv, { underlying: 'MO · 中证1000', expiry: '2025-01-17', multiplier: 100 });
-    expect(preview.errors).toEqual([]);
-    expect(preview.spot).toBeCloseTo(5797.089);
-    expect(preview.riskFreeRate).toBeCloseTo(1.66);
-    expect(preview.rows[0].modelRate).toBeCloseTo(0.0166);
-    expect(preview.rows[0].modelTime).toBeCloseTo(15 / 365);
-    expect(preview.rows[0].dividendYield).toBeCloseTo(0.087);
-    expect(preview.rows[1].dividendYield).toBeCloseTo(0.087);
-  });
-
   it('migrates old legs into shared chain contracts and positions', () => {
     const oldLeg: OptionLeg={id:'old',optionType:'CALL',side:'LONG',strike:4300,premium:76.2,quantity:2,multiplier:100,expiry:'2026-12-24',iv:.2,greeks:{delta:.5}};
     const migrated=migrateWorkbenchState({...defaults,legs:[oldLeg,{...oldLeg,id:'old2',quantity:1}]},defaults);

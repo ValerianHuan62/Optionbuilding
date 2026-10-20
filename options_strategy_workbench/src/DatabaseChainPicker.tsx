@@ -8,10 +8,8 @@ export type DatabaseChain = {
   underlying: string;
   valuationDate: string;
   spot: number;
-  modelSpot?: number | null;
   riskFreeRate: number | null;
   riskFreeRateByExpiry: Record<string, number | null>;
-  pricingByExpiry?: Record<string,{dividendYield:number|null;qStatus:string;validPairs:number;selectedPairs:number;usedPairs:number;outliers:number;method:string}>;
   expiries: string[];
   rows: OptionContract[];
 };
@@ -108,12 +106,11 @@ export function databaseLoadedSettings(data: DatabaseChain, state: WorkbenchStat
   return {
     underlying: data.underlying,
     valuationDate: data.valuationDate,
-    spot: data.modelSpot ?? data.spot,
+    spot: data.spot,
     expiry: selectedExpiry,
     multiplier: data.rows[0]?.multiplier ?? state.multiplier,
     riskFreeRate: data.riskFreeRateByExpiry[selectedExpiry] ?? data.riskFreeRate ?? state.riskFreeRate,
-    dividendYield: data.pricingByExpiry?.[selectedExpiry]?.dividendYield == null ? state.dividendYield : data.pricingByExpiry[selectedExpiry].dividendYield! * 100,
-    dividendYieldSource: data.pricingByExpiry?.[selectedExpiry]?.dividendYield == null ? 'UNSET' as const : 'DATABASE' as const,
+    dividendYield: data.product === 'MO' ? 1.1 : data.product === 'IO' ? 2.3 : data.product === 'HO' ? 2.8 : state.dividendYield,
     daysToExpiry: Math.max(0, (utc(selectedExpiry) - utc(data.valuationDate)) / 86400000),
     optionChain: data.rows,
   };
