@@ -13,6 +13,8 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from parity import estimate_group_q
+
 
 PRODUCT_LABELS = {
     "MO": "MO · 中证1000",
@@ -88,6 +90,10 @@ def chain(product: str, trade_date: str) -> dict:
              'ivAt', CASE WHEN g.iv IS NULL THEN NULL ELSE o.date::text END,
              'impliedVolatility', g.iv,
              'riskFreeRate', g.r * 100.0,
+             'modelRate', g.r,
+             'modelTime', g.t,
+             'modelSpot', g.forward,
+             'option_type_source', c.option_type,
              'spot', m.index_close,
              'greeks', json_build_object(
                'delta', g.delta_f,
@@ -109,6 +115,25 @@ def chain(product: str, trade_date: str) -> dict:
     if not rows:
         raise LookupError("所选估值日没有该品种的期权链数据。")
     expiries = sorted({row["expiry"] for row in rows})
+    q_by_expiry: dict[str, dict] = {}
+    for expiry in expiries:
+        group = [row for row in rows if row["expiry"] == expiry]
+        model_rows = [{"date": trade_date, "expiry": expiry, "strike": row["strike"],
+                       "option_type": row["option_type_source"], "bid": row["bid"], "ask": row["ask"]}
+                      for row in group]
+        model_spot = next((row["modelSpot"] for row in group if row.get("modelSpot") is not None), None)
+        model_rate = next((row["modelRate"] for row in group if row.get("modelRate") is not None), None)
+        if model_spot is not None and model_rate is not None:
+            q, diagnostics, _ = estimate_group_q(model_rows, float(model_spot), float(model_rate))
+        else:
+            q, diagnostics = None, {"q_status": "MISSING_MODEL_SPOT_OR_RATE", "valid_pairs": 0, "selected_pairs": 0}
+        q_by_expiry[expiry] = {"dividendYield": q, "qStatus": diagnostics["q_status"],
+                               "validPairs": diagnostics.get("valid_pairs", 0), "selectedPairs": diagnostics.get("selected_pairs", 0),
+                               "usedPairs": diagnostics.get("used_pairs", 0), "outliers": diagnostics.get("q_outliers", 0),
+                               "method": "NEAREST_5_PARITY_PAIRS_MEDIAN_3SCALED_MAD"}
+        for row in group:
+            row["dividendYield"] = q
+            row["qStatus"] = diagnostics["q_status"]
     rate_by_expiry = {
         expiry: next((row["riskFreeRate"] for row in rows if row["expiry"] == expiry and row["riskFreeRate"] is not None), None)
         for expiry in expiries
@@ -118,8 +143,10 @@ def chain(product: str, trade_date: str) -> dict:
         "underlying": PRODUCT_LABELS[product],
         "valuationDate": trade_date,
         "spot": rows[0]["spot"],
+        "modelSpot": next((row["modelSpot"] for row in rows if row.get("modelSpot") is not None), None),
         "riskFreeRate": next((row["riskFreeRate"] for row in rows if row["riskFreeRate"] is not None), None),
         "riskFreeRateByExpiry": rate_by_expiry,
+        "pricingByExpiry": q_by_expiry,
         "expiries": expiries,
         "rows": [
             {**row, "greeks": {key: value for key, value in row["greeks"].items() if value is not None}}

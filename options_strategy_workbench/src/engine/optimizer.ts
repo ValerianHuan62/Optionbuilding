@@ -3,7 +3,6 @@ import { analyzePayoff, type PayoffAnalysis } from './payoffAnalyzer';
 import { grossExpirationPnl, sign } from './payoff';
 import { marginForContract } from './margin';
 import { priceOption } from './pricing';
-import { dividendYieldFor } from '../utils/dividendYield';
 
 export type StrategyKind = 'BULL_CALL' | 'BEAR_CALL' | 'BULL_PUT' | 'BEAR_PUT' | 'IRON_CONDOR' | 'IRON_BUTTERFLY' | 'LONG_STRADDLE' | 'SHORT_STRADDLE' | 'LONG_STRANGLE' | 'SHORT_STRANGLE';
 export type EntryMode = 'EXECUTABLE' | 'MID';
@@ -17,7 +16,7 @@ export type OptimizerSettings = { greekUnitsVersion: 2; underlying: string; expi
 export type Position = { contract: OptionContract; side: Side };
 export type PointGreeks = { delta: number; gamma: number; theta: number; vega: number; rho: number };
 export type ScenarioMark = { value: number; greeks: PointGreeks | null };
-export type Candidate = { id: string; positions: Position[]; legs: OptionLeg[]; payoff: PayoffAnalysis; entryPnl: 0; netPremium: number; maxProfit: number | 'UNLIMITED'; maxLoss: number | 'UNLIMITED'; margin: number | null; entryFees: number; exitFees: number; settlementFees: number; scenarioPnls: number[]; expiryScenarioPnls: number[]; scenarioPnlGaps: number[]; expiryWorstScenario: number; ivQuality: IvQuality; initialMoneyness: number; scenarioGreeks: (PointGreeks | null)[]; entryGreeks: (PointGreeks | null)[]; baseGreeks: PointGreeks; reversalCount: number; maxAbsGreeks: PointGreeks; worstScenario: number; breakEvens: number[] };
+export type Candidate = { id: string; positions: Position[]; legs: OptionLeg[]; payoff: PayoffAnalysis; entryPnl: 0; netPremium: number; maxProfit: number | 'UNLIMITED'; maxLoss: number | 'UNLIMITED'; margin: number | null; entryFees: number; exitFees: number; settlementFees: number; scenarioPnls: number[]; modelScenarioPnls: number[]; marketMidScenarioPnls: number[]; expiryScenarioPnls: number[]; scenarioPnlGaps: number[]; expiryWorstScenario: number; ivQuality: IvQuality; initialMoneyness: number; scenarioGreeks: (PointGreeks | null)[]; entryGreeks: (PointGreeks | null)[]; baseGreeks: PointGreeks; reversalCount: number; maxAbsGreeks: PointGreeks; worstScenario: number; breakEvens: number[] };
 export type Counts = { enumerated: number; structure: number; quotes: number; pricing: number; risk: number; ranked: number; reasons: Record<string, number> };
 export type Prepared = { settings: OptimizerSettings; state: WorkbenchState; contracts: OptionContract[]; marks: Map<string, ScenarioMark[]>; baseMarks: Map<string, ScenarioMark>; counts: Counts; daysToExpiry: number };
 export type ScoredCandidate = Candidate & { expected: number; expectedLoss: number | null; expectedMargin: number | null; profitableWeight: number; expiryProfitableWeight: number; expectedPnlGap: number; rank: number };
@@ -102,17 +101,20 @@ export function prepareOptimization(state: WorkbenchState, settings: OptimizerSe
   const contracts=[...universe.values()].sort((a,b)=>a.strike-b.strike);
   const marks = new Map<string, ScenarioMark[]>(), baseMarks = new Map<string, ScenarioMark>();
   const daysToExpiry = calendarDays(settings.expiry,state.valuationDate);
-  const dividend = dividendYieldFor(settings.underlying,state.dividendYield);
   for (const c of contracts) {
     if (!Number.isFinite(c.impliedVolatility)||c.impliedVolatility!<=0) continue;
+    const q = c.dividendYield ?? (state.dividendYieldSource==='UNSET'?null:state.dividendYield/100);
+    if(q===null||!Number.isFinite(q))continue;
+    const dividend=q*100, rate=c.modelRate!=null?c.modelRate*100:state.riskFreeRate, spot=c.modelSpot??state.spot;
+    const days=c.modelTime!=null?c.modelTime*365:daysToExpiry;
     const valueAt = (spot: number, iv: number, days: number): ScenarioMark => {
-      const quote=priceOption({optionType:c.optionType,strike:c.strike,iv},{spot,rate:state.riskFreeRate,dividend,days});
+      const quote=priceOption({optionType:c.optionType,strike:c.strike,iv},{spot,rate,dividend,days});
       return {value:quote.value,greeks:quote.greeks?pointGreeks(quote.greeks):null};
     };
-    const base=valueAt(state.spot,c.impliedVolatility!,daysToExpiry);
+    const base=valueAt(spot,c.impliedVolatility!,days);
     if (!Number.isFinite(base.value)) continue;
     baseMarks.set(c.contractId,base);
-    marks.set(c.contractId,settings.scenarios.map(s=>valueAt(state.spot*(1+s.movePct/100),c.impliedVolatility!+s.ivPp/100,daysToExpiry-s.days)));
+    marks.set(c.contractId,settings.scenarios.map(s=>valueAt(spot*(1+s.movePct/100),c.impliedVolatility!+s.ivPp/100,days-s.days)));
   }
   return {state,settings,contracts,marks,baseMarks,daysToExpiry,counts:{enumerated:0,structure:0,quotes:0,pricing:0,risk:0,ranked:0,reasons:{}}};
 }
@@ -159,10 +161,12 @@ function entryPrice(c: OptionContract, side: Side, mode: EntryMode): number | nu
 }
 const marketReference=(c:OptionContract)=>c.marketPremium??c.premium??(c.bid!=null&&c.ask!=null?(c.bid+c.ask)/2:null);
 export function assessQuoteQuality(positions: Position[], state: WorkbenchState, settings: OptimizerSettings, days: number): IvQuality {
-  const reject:string[]=[],warnings:string[]=[],t=Math.max(0,days)/365,r=state.riskFreeRate/100,q=dividendYieldFor(settings.underlying,state.dividendYield)/100;
+  const reject:string[]=[],warnings:string[]=[],t=Math.max(0,days)/365;
   for(const {contract:c} of positions){
     if(!Number.isFinite(c.impliedVolatility)||c.impliedVolatility!<=0){reject.push(`${c.contractId}：IV 无效`);continue;}
-    const reference=marketReference(c),lower=c.optionType==='CALL'?Math.max(0,state.spot*Math.exp(-q*t)-c.strike*Math.exp(-r*t)):Math.max(0,c.strike*Math.exp(-r*t)-state.spot*Math.exp(-q*t));
+    const q=c.dividendYield??(state.dividendYieldSource==='UNSET'?null:state.dividendYield/100),r=c.modelRate??state.riskFreeRate/100,s=c.modelSpot??state.spot,ti=c.modelTime??t;
+    if(q===null||!Number.isFinite(q)){reject.push(`${c.contractId}：缺少同估值日/到期日 q`);continue;}
+    const reference=marketReference(c),lower=c.optionType==='CALL'?Math.max(0,s*Math.exp(-q*ti)-c.strike*Math.exp(-r*ti)):Math.max(0,c.strike*Math.exp(-r*ti)-s*Math.exp(-q*ti));
     if(reference===null||!Number.isFinite(reference)||reference<lower-.1)reject.push(`${c.contractId}：行情价格低于 BSM 欧式下界`);
     const itm=c.optionType==='CALL'?(state.spot-c.strike)/state.spot:(c.strike-state.spot)/state.spot;
     if(itm>=.08&&c.impliedVolatility!>=.8)warnings.push(`${c.contractId}：深度 ITM 且 IV ≥ 80%，请核对反算输入`);
@@ -180,6 +184,7 @@ export function assessQuoteQuality(positions: Position[], state: WorkbenchState,
     for(let i=1;i<ordered.length;i++){
       const lo=ordered[i-1].contract,hi=ordered[i].contract,a=marketReference(lo),b=marketReference(hi);
       if(a===null||b===null)continue;
+      const r=hi.modelRate??lo.modelRate??state.riskFreeRate/100,t=Math.max(0,hi.modelTime??lo.modelTime??days/365);
       const vertical=type==='CALL'?a-b:b-a,upper=(hi.strike-lo.strike)*Math.exp(-r*t);
       if(vertical<-.1)reject.push(`${type} 行情价格未随执行价单调变化`);
       if(vertical>upper+.1)reject.push(`${type} 行情垂直价差超过无套利上界`);
@@ -220,14 +225,14 @@ function surfaceValid(positions: Position[], marks: Map<string,ScenarioMark>, da
   }
   return true;
 }
-export function evaluateCandidate(prep: Prepared, positions: Position[]): Candidate | null {
+export function evaluateCandidate(prep: Prepared, positions: Position[], pnlBasis:'MODEL'|'MARKET'='MARKET'): Candidate | null {
   const {counts,settings,state}=prep; counts.enumerated++;
   if(settings.limits.maxLegs.enabled&&positions.length>settings.limits.maxLegs.value) {record(counts,'腿数约束');return null;}
   counts.structure++;
   if(settings.entryMode==='EXECUTABLE'&&positions.some(p=>p.contract.contractId.startsWith('['))) {record(counts,'缺少真实合约代码');return null;}
   if(!positions.every(p=>validQuote(p.contract,p.side,settings))) {record(counts,'报价 / 流动性不足');return null;}
   counts.quotes++;
-  const legs:OptionLeg[]=positions.map(p=>({id:p.contract.contractId,optionType:p.contract.optionType,side:p.side,strike:p.contract.strike,premium:entryPrice(p.contract,p.side,settings.entryMode)!,quantity:1,multiplier:p.contract.multiplier,expiry:p.contract.expiry,iv:p.contract.impliedVolatility!,greeks:p.contract.greeks}));
+  const legs:OptionLeg[]=positions.map(p=>({id:p.contract.contractId,optionType:p.contract.optionType,side:p.side,strike:p.contract.strike,premium:entryPrice(p.contract,p.side,settings.entryMode)!,marketEntryPremium:marketReference(p.contract)??entryPrice(p.contract,p.side,settings.entryMode)!,quantity:1,multiplier:p.contract.multiplier,expiry:p.contract.expiry,iv:p.contract.impliedVolatility!,greeks:p.contract.greeks,modelSpot:p.contract.modelSpot,modelRate:p.contract.modelRate,modelTime:p.contract.modelTime,dividendYield:p.contract.dividendYield??(state.dividendYieldSource==='UNSET'?null:state.dividendYield/100),qStatus:p.contract.qStatus}));
   const ivQuality=assessQuoteQuality(positions,state,settings,prep.daysToExpiry);
   if(ivQuality.status==='REJECT'){record(counts,ivQuality.issues[0]);return null;}
   if(positions.some(p=>!prep.baseMarks.has(p.contract.contractId))) {record(counts,'IV / BSM 输入无效');return null;}
@@ -242,16 +247,19 @@ export function evaluateCandidate(prep: Prepared, positions: Position[]): Candid
   if(preference.negativeDelta&&baseGreeks.delta>=0||preference.negativeVega&&baseGreeks.vega>=0||preference.positiveTheta&&baseGreeks.theta<=0){record(counts,'Greeks 策略偏好');return null;}
   const marginRows=positions.filter(p=>p.side==='SHORT').map(p=>marginForContract(p.contract,{side:'SHORT',quantity:1},state.spot,state.marginParams??{m:.12,minimumRatio:.5}));
   const margin=marginRows.every(x=>x?.amount!=null)?marginRows.reduce((sum,x)=>sum+x!.amount!,0):null;
-  const pnls:number[]=[],scenarioGreeks:(PointGreeks|null)[]=[];
+  const pnls:number[]=[],modelPnls:number[]=[],marketMidPnls:number[]=[],scenarioGreeks:(PointGreeks|null)[]=[];
   for(let i=0;i<settings.scenarios.length;i++) {
     const scenario=settings.scenarios[i], remaining=prep.daysToExpiry-scenario.days, marks=new Map<string,ScenarioMark>();
     positions.forEach(p=>marks.set(p.contract.contractId,prep.marks.get(p.contract.contractId)?.[i]??{value:NaN,greeks:null}));
     if([...marks.values()].some(mark=>!Number.isFinite(mark.value))) {record(counts,'情景 IV / BSM 无效');return null;}
     if(!surfaceValid(positions,marks,remaining,state.riskFreeRate)) {record(counts,'跨执行价 BSM 曲面异常');return null;}
-    let pnl=-entryFees-(remaining===0?settlementFees:exitFees); const g=emptyGreeks();
+    let pnl=-entryFees-(remaining===0?settlementFees:exitFees),modelPnl=0,marketMidPnl=0; const g=emptyGreeks();
     for(const p of positions) { const mark=marks.get(p.contract.contractId)!;
       if(!Number.isFinite(mark.value)) {record(counts,'情景 IV / BSM 无效');return null;}
       pnl+=sign(p.side)*(mark.value-entryPrice(p.contract,p.side,settings.entryMode)!)*p.contract.multiplier;
+      marketMidPnl+=sign(p.side)*(mark.value-(marketReference(p.contract)??entryPrice(p.contract,p.side,settings.entryMode)!))*p.contract.multiplier;
+      const base=prep.baseMarks.get(p.contract.contractId)!;
+      modelPnl+=sign(p.side)*(mark.value-base.value)*p.contract.multiplier;
       addGreeks(g,mark.greeks,sign(p.side));
     }
     // Discount the extrema of the terminal payoff, then subtract the actual entry cash flow.
@@ -260,13 +268,15 @@ export function evaluateCandidate(prep: Prepared, positions: Position[]): Candid
     const upper=payoff.maxProfit==='UNLIMITED'?Infinity:discount*(payoff.maxProfit+payoff.netDebit)-payoff.netDebit-entryFees-(remaining===0?settlementFees:exitFees);
     const tolerance=Math.max(.1,positions.reduce((sum,p)=>sum+p.contract.multiplier,0)*state.spot*1e-7);
     if(pnl<lower-tolerance||pnl>upper+tolerance) {record(counts,'组合收益边界异常');return null;}
-    pnls.push(pnl);scenarioGreeks.push(remaining>0?g:null);
+    pnls.push(pnl);modelPnls.push(modelPnl);marketMidPnls.push(marketMidPnl);scenarioGreeks.push(remaining>0?g:null);
   }
   counts.pricing++;
-  const expiryScenarioPnls=expirationScenarioPnls(legs,settings.scenarios,state.spot,entryFees,settlementFees);
-  const scenarioPnlGaps=pnls.map((x,i)=>x-expiryScenarioPnls[i]);
+  const marketMidLegs=legs.map(l=>({...l,premium:l.marketEntryPremium??l.premium}));
+  const expiryScenarioPnls=expirationScenarioPnls(marketMidLegs,settings.scenarios,state.spot);
+  const selectedPnls=pnlBasis==='MODEL'?modelPnls:marketMidPnls;
+  const scenarioPnlGaps=selectedPnls.map((x,i)=>x-expiryScenarioPnls[i]);
   const too=(key:keyof OptimizerLimits,value:number|null)=>settings.limits[key].enabled&&(value===null||value>settings.limits[key].value);
-  if(too('maxLoss',maxLoss==='UNLIMITED'?null:maxLoss)||too('maxMargin',margin)||too('maxScenarioLoss',Math.max(0,-Math.min(...pnls)))||too('maxDelta',Math.abs(baseGreeks.delta))||too('maxGamma',Math.abs(baseGreeks.gamma))||too('maxVega',Math.abs(baseGreeks.vega))) {record(counts,'风险预算');return null;}
+  if(too('maxLoss',maxLoss==='UNLIMITED'?null:maxLoss)||too('maxMargin',margin)||too('maxScenarioLoss',Math.max(0,-Math.min(...selectedPnls)))||too('maxDelta',Math.abs(baseGreeks.delta))||too('maxGamma',Math.abs(baseGreeks.gamma))||too('maxVega',Math.abs(baseGreeks.vega))) {record(counts,'风险预算');return null;}
   counts.risk++; counts.ranked++;
   const {reversals:reversalCount,maxAbs:maxAbsGreeks}=greekRiskSummary(baseGreeks,scenarioGreeks);
   const terminal=(x:number)=>grossExpirationPnl(legs,x)-entryFees-settlementFees;
@@ -275,13 +285,13 @@ export function evaluateCandidate(prep: Prepared, positions: Position[]): Candid
   const last=knots.at(-1)!; const tailSlope=terminal(last+1)-terminal(last);if(Math.abs(tailSlope)>1e-8){const root=last-terminal(last)/tailSlope;if(root>=last)breakEvens.push(root);}
   const reference=positions.find(p=>p.side==='SHORT')?.contract??positions[0].contract;
   const initialMoneyness=(reference.optionType==='CALL'?reference.strike/state.spot-1:1-reference.strike/state.spot)*100;
-  return {id:positions.map(p=>`${p.side[0]}${p.contract.optionType[0]}${p.contract.strike}`).join('/'),positions,legs,payoff,entryPnl:0,netPremium:payoff.netPremium,maxProfit,maxLoss,margin,entryFees,exitFees,settlementFees,scenarioPnls:pnls,expiryScenarioPnls,scenarioPnlGaps,expiryWorstScenario:Math.min(...expiryScenarioPnls),ivQuality,initialMoneyness,scenarioGreeks,entryGreeks,baseGreeks,reversalCount,maxAbsGreeks,worstScenario:Math.min(...pnls),breakEvens};
+  return {id:positions.map(p=>`${p.side[0]}${p.contract.optionType[0]}${p.contract.strike}`).join('/'),positions,legs,payoff,entryPnl:0,netPremium:payoff.netPremium,maxProfit,maxLoss,margin,entryFees,exitFees,settlementFees,scenarioPnls:pnls,modelScenarioPnls:modelPnls,marketMidScenarioPnls:marketMidPnls,expiryScenarioPnls,scenarioPnlGaps,expiryWorstScenario:Math.min(...expiryScenarioPnls),ivQuality,initialMoneyness,scenarioGreeks,entryGreeks,baseGreeks,reversalCount,maxAbsGreeks,worstScenario:Math.min(...selectedPnls),breakEvens};
 }
 
-export function rankCandidates(candidates: Candidate[], scenarios: Scenario[], metric: RankMetric = 'EXPECTED'): ScoredCandidate[] {
+export function rankCandidates(candidates: Candidate[], scenarios: Scenario[], metric: RankMetric = 'EXPECTED', basis:'MODEL'|'MARKET'='MARKET'): ScoredCandidate[] {
   const error=validateProbabilities(scenarios);if(error)throw new Error(error);
   const weight=scenarios.map(s=>s.probability/100);
-  return candidates.map(c=>{const expected=c.scenarioPnls.reduce((sum,pnl,i)=>sum+pnl*weight[i],0);return {...c,expected,expectedLoss:c.maxLoss==='UNLIMITED'||c.maxLoss<=0?null:expected/c.maxLoss,expectedMargin:c.margin===null||c.margin<=0?null:expected/c.margin,profitableWeight:c.scenarioPnls.reduce((sum,pnl,i)=>sum+(pnl>0?weight[i]:0),0),expiryProfitableWeight:c.expiryScenarioPnls.reduce((sum,pnl,i)=>sum+(pnl>0?weight[i]:0),0),expectedPnlGap:c.scenarioPnlGaps.reduce((sum,gap,i)=>sum+gap*weight[i],0),rank:0};})
+  return candidates.map(c=>{const pnls=basis==='MODEL'?(c.modelScenarioPnls??c.scenarioPnls):(c.marketMidScenarioPnls??c.scenarioPnls),expected=pnls.reduce((sum,pnl,i)=>sum+pnl*weight[i],0);return {...c,expected,expectedLoss:c.maxLoss==='UNLIMITED'||c.maxLoss<=0?null:expected/c.maxLoss,expectedMargin:c.margin===null||c.margin<=0?null:expected/c.margin,profitableWeight:pnls.reduce((sum,pnl,i)=>sum+(pnl>0?weight[i]:0),0),expiryProfitableWeight:c.expiryScenarioPnls.reduce((sum,pnl,i)=>sum+(pnl>0?weight[i]:0),0),expectedPnlGap:c.scenarioPnlGaps.reduce((sum,gap,i)=>sum+gap*weight[i],0),rank:0};})
     .sort((a,b)=>(metric==='EXPECTED'?b.expected-a.expected:metric==='EXPECTED_MARGIN'?(b.expectedMargin??-Infinity)-(a.expectedMargin??-Infinity):(b.expectedLoss??-Infinity)-(a.expectedLoss??-Infinity))||a.id.localeCompare(b.id)).map((x,i)=>({...x,rank:i+1}));
 }
 function rng(seed:number){let x=seed>>>0;return()=>{x=(Math.imul(x,1664525)+1013904223)>>>0;return x/4294967296;};}
@@ -297,10 +307,10 @@ export function sampleProbabilities(base: Scenario[], amplitudePp:number, count:
     const actual=Math.min(hi,Math.max(lo,transfer));p[i]+=actual;p[j]-=actual;
   }return p;});
 }
-export function robustness(candidates: Candidate[], scenarios: Scenario[], amplitudePp=10, count=1000, seed=42, metric: RankMetric='EXPECTED'): RobustStats[] {
+export function robustness(candidates: Candidate[], scenarios: Scenario[], amplitudePp=10, count=1000, seed=42, metric: RankMetric='EXPECTED', basis:'MODEL'|'MARKET'='MARKET'): RobustStats[] {
   const vectors=sampleProbabilities(scenarios,amplitudePp,count,seed), observations=new Map(candidates.map(c=>[c.id,{values:[] as number[],ranks:[] as number[],top5:0}]));
   const score=(value:number,c:Candidate)=>metric==='EXPECTED'?value:metric==='EXPECTED_LOSS'?c.maxLoss==='UNLIMITED'||c.maxLoss<=0?-Infinity:value/c.maxLoss:c.margin===null||c.margin<=0?-Infinity:value/c.margin;
-  for(const p of vectors) {const ranked=candidates.map(c=>({id:c.id,value:c.scenarioPnls.reduce((sum,x,i)=>sum+x*p[i],0),candidate:c})).sort((a,b)=>
+  for(const p of vectors) {const ranked=candidates.map(c=>({id:c.id,value:(basis==='MODEL'?(c.modelScenarioPnls??c.scenarioPnls):(c.marketMidScenarioPnls??c.scenarioPnls)).reduce((sum,x,i)=>sum+x*p[i],0),candidate:c})).sort((a,b)=>
     score(b.value,b.candidate)-score(a.value,a.candidate)||a.id.localeCompare(b.id));
     ranked.forEach((r,i)=>{const o=observations.get(r.id)!;o.values.push(r.value);o.ranks.push(i+1);if(i<5)o.top5++;});
   }
@@ -312,5 +322,5 @@ export function loadCandidate(state: WorkbenchState, candidate: Candidate, setti
   const next={...state,underlying:settings.underlying,expiry:settings.expiry,optionChain:[...merged.values()],activeStrategy,activeSavedStrategyId:null,costs:{...settings.costs}};
   if(!saveForCompare)return next;
   const now=new Date().toISOString();const id=`optimizer-${crypto.randomUUID()}`;
-  return {...state,optionChain:[...merged.values()],savedStrategies:[...(state.savedStrategies??[]),{id,name:`${settings.strategy.replaceAll('_',' ')} · ${candidate.id}`,underlying:settings.underlying,createdAt:now,updatedAt:now,legs:activeStrategy,pricingSettings:{valuationDate:state.valuationDate,spot:state.spot,expiry:settings.expiry,riskFreeRate:state.riskFreeRate,dividendYield:dividendYieldFor(settings.underlying,state.dividendYield),multiplier:state.multiplier,marginParams:state.marginParams},transactionCosts:{...settings.costs},notes:`Strike Optimizer · ${settings.entryMode}`}]};
+  return {...state,optionChain:[...merged.values()],savedStrategies:[...(state.savedStrategies??[]),{id,name:`${settings.strategy.replaceAll('_',' ')} · ${candidate.id}`,underlying:settings.underlying,createdAt:now,updatedAt:now,legs:activeStrategy,pricingSettings:{valuationDate:state.valuationDate,spot:state.spot,expiry:settings.expiry,riskFreeRate:state.riskFreeRate,dividendYield:state.dividendYield,dividendYieldSource:state.dividendYieldSource,multiplier:state.multiplier,marginParams:state.marginParams},transactionCosts:{...settings.costs},notes:`Strike Optimizer · ${settings.entryMode}`}]};
 }

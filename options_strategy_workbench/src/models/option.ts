@@ -3,7 +3,7 @@ export type Side = 'LONG' | 'SHORT';
 export type GreekInput = { delta?: number; gamma?: number; theta?: number; vega?: number; rho?: number; source?: GreekInputFormat; snapshotAt?: string };
 export type GreekInputFormat = 'LEGACY_POINTS' | 'STANDARDIZED' | 'TONGHUASHUN_RAW' | 'KUAIQI_RAW';
 export type GreekRawProfile = { thetaUnit: 'DAY' | 'YEAR'; vegaUnit: 'IV_POINT' | 'IV_DECIMAL'; rhoUnit: 'RATE_POINT' | 'RATE_DECIMAL'; includesMultiplier: boolean };
-export type OptionContract = { contractId: string; underlying: string; optionType: OptionType; strike: number; expiry: string; multiplier: number; /** Legacy alias retained for saved v1 data and UI wiring. */ premium: number | null; marketPremium?: number | null; settlementPrice?: number | null; bid?: number | null; ask?: number | null; last?: number | null; volume?: number | null; openInterest?: number | null; quoteStatus?: string | null; /** Source times, never the file import time. */ quoteAt?: string | null; ivAt?: string | null; impliedVolatility: number | null; greeks: GreekInput };
+export type OptionContract = { contractId: string; underlying: string; optionType: OptionType; strike: number; expiry: string; multiplier: number; /** Legacy alias retained for saved v1 data and UI wiring. */ premium: number | null; marketPremium?: number | null; settlementPrice?: number | null; bid?: number | null; ask?: number | null; last?: number | null; volume?: number | null; openInterest?: number | null; quoteStatus?: string | null; /** Source times, never the file import time. */ quoteAt?: string | null; ivAt?: string | null; impliedVolatility: number | null; modelSpot?: number | null; modelRate?: number | null; modelTime?: number | null; dividendYield?: number | null; qStatus?: string | null; greeks: GreekInput };
 export type ActivePosition = { contractId: string; side: Side; quantity: number; entryPremium?: number };
 export type OptionLeg = {
   id: string;
@@ -11,11 +11,17 @@ export type OptionLeg = {
   side: Side;
   strike: number;
   premium: number;
+  marketEntryPremium?: number;
   quantity: number;
   multiplier: number;
   expiry: string;
   iv: number;
   greeks: GreekInput;
+  modelSpot?: number | null;
+  modelRate?: number | null;
+  modelTime?: number | null;
+  dividendYield?: number | null;
+  qStatus?: string | null;
 };
 export type Costs = { openPerContract: number; closePerContract: number; settlementPerContract: number };
 export type GreekValues = { delta: number | null; gamma: number | null; theta: number | null; vega: number | null; rho: number | null };
@@ -29,6 +35,7 @@ export type WorkbenchState = {
   daysToExpiry: number;
   riskFreeRate: number;
   dividendYield: number;
+  dividendYieldSource?: 'DATABASE' | 'MANUAL' | 'UNSET';
   costs: Costs;
   /** Legacy field retained only for importing older saved files. */
   legs?: OptionLeg[];
@@ -42,5 +49,5 @@ export type WorkbenchState = {
   activeSavedStrategyId?: string | null;
   migrationNote?: string;
 };
-export type SavedStrategy = { id: string; name: string; underlying: string; createdAt: string; updatedAt: string; legs: SavedStrategyLeg[]; pricingSettings: Pick<WorkbenchState, 'valuationDate' | 'spot' | 'expiry' | 'riskFreeRate' | 'dividendYield' | 'multiplier' | 'marginParams'>; transactionCosts: Costs; notes: string; migrationNote?: string };
+export type SavedStrategy = { id: string; name: string; underlying: string; createdAt: string; updatedAt: string; legs: SavedStrategyLeg[]; pricingSettings: Pick<WorkbenchState, 'valuationDate' | 'spot' | 'expiry' | 'riskFreeRate' | 'dividendYield' | 'dividendYieldSource' | 'multiplier' | 'marginParams'>; transactionCosts: Costs; notes: string; migrationNote?: string };
 export type SavedStrategyLeg = { contractId: string; side: Side; quantity: number; entryPremium: number; settlementPrice?: number | null };

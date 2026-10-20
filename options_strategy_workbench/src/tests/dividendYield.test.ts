@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { dividendYieldFor, fixedDividendYield } from '../utils/dividendYield';
 
-describe('index dividend yields', () => {
-  it('uses the fixed HO, IO and MO rates even with stale saved inputs', () => {
-    expect(dividendYieldFor('HO · 上证50', 9)).toBe(2.8);
-    expect(dividendYieldFor('IO · 沪深300', 9)).toBe(2.3);
-    expect(dividendYieldFor('MO · 中证1000', 9)).toBe(1.1);
+describe('dividend yield inputs', () => {
+  it('does not apply an instrument-wide fixed rate', () => {
+    expect(dividendYieldFor('HO · 上证50', 9)).toBe(9);
+    expect(dividendYieldFor('IO · 沪深300', 9)).toBe(9);
+    expect(dividendYieldFor('MO · 中证1000', 9)).toBe(9);
+    expect(fixedDividendYield('MO · 中证1000')).toBeNull();
   });
 
   it('keeps the custom index rate editable', () => {
